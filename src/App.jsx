@@ -37,7 +37,7 @@ const isValidGoogleUrl = (urlString) => {
   }
 };
 
-// Sanitizador de enlaces externos de noticias (previene XSS por javascript:)
+// Sanitizador de enlaces externos de noticias
 const sanitizeHttpUrl = (urlString) => {
   try {
     const parsed = new URL(urlString);
@@ -47,42 +47,67 @@ const sanitizeHttpUrl = (urlString) => {
   }
 };
 
-// Noticias base curadas sobre los ejes de las Jornadas
+// Palabras prohibidas globales para evitar ruido (accidentes, policiales, deportes, farándula)
+const globalExclusions = ['accidente', 'choque', 'muerto', 'fallecido', 'policial', 'detenido', 'robo', 'clima', 'pronostico', 'futbol', 'partido', 'papa', 'vaticano', 'espectaculo', 'famosos'];
+
+// Función de validación metodológica y temática estricta
+const passesStrictFilter = (title, snippet, category) => {
+  const text = (title + ' ' + snippet).toLowerCase();
+  
+  // 1. Verificar exclusiones globales
+  for (const badWord of globalExclusions) {
+    if (text.includes(badWord)) return false;
+  }
+
+  // 2. Validaciones específicas por eje metodológico
+  if (category === 'Perspectiva de Género') {
+    const genderKeywords = ['genero', 'feminism', 'disidencias', 'mujeres', 'colectivo', 'cuidado', 'patriarcado', 'diversidad', 'LGBTIQ', 'violencia machista'];
+    return genderKeywords.some(kw => text.includes(kw));
+  }
+
+  if (category === 'UNCo (Fiske Menuco / Neuquén)') {
+    const uncoKeywords = ['unco', 'comahue', 'fadecs', 'general roca', 'fiske', 'neuquen', 'universidad', 'docentes', 'estudiantes', 'claustro'];
+    return uncoKeywords.some(kw => text.includes(kw));
+  }
+
+  return true;
+};
+
+// Noticias base metodológicas curadas
 const fallbackNews = [
-  { id: 'base-1', tag: 'Ambiente y Extractivismo', title: 'Audiencia contra los proyectos extractivistas y en defensa del Golfo San Matías', date: '12 Nov 2026', source: 'Agencia Farco', url: 'https://agencia.farco.org.ar/2026/11/12/rio-negro-hoy-una-audiencia-contra-los-proyectos-extractivistas-y-en-defensa-del-golfo-san-matias/', snippet: 'Comunidades y asambleas socioambientales exponen el impacto sobre el ecosistema marino y el uso del agua en la región.' },
-  { id: 'base-2', tag: 'Perspectiva de Género', title: 'Agendas feministas y diversidades frente a las reconfiguraciones socioestatales en la Patagonia', date: '10 Nov 2026', source: 'Diario Río Negro', url: 'https://www.rionegro.com.ar/', snippet: 'Debates sobre la precarización de las tareas de cuidado y organización comunitaria de las mujeres y disidencias.' },
-  { id: 'base-3', tag: 'UNCo (Fiske Menuco / Neuquén)', title: 'Actividades académicas y de extensión en FADECS y sedes del Alto Valle y Neuquén', date: '05 Nov 2026', source: 'UNCo Informa', url: 'https://neuqueninforma.gob.ar/', snippet: 'Novedades sobre investigación, adscripciones y posicionamientos públicos de la Universidad Nacional del Comahue.' }
+  { id: 'base-1', tag: 'Extractivismo y Minería', title: 'Audiencia y resistencia socioambiental en defensa del Golfo San Matías frente al avance extractivista', date: '12 Nov 2026', source: 'Agencia Farco', url: 'https://agencia.farco.org.ar/', snippet: 'Debate interdisciplinario sobre el impacto en los bienes comunes y la mercantilización del territorio patagónico.' },
+  { id: 'base-2', tag: 'Desigualdades Socio-Territoriales', title: 'Renta hidrocarburífera y crisis habitacional: la brecha entre los enclaves de inversión y los barrios populares', date: '09 Nov 2026', source: 'Diario Río Negro', url: 'https://www.rionegro.com.ar/', snippet: 'Análisis crítico sobre el acceso desigual al suelo urbano y la precarización habitacional en el Alto Valle.' },
+  { id: 'base-3', tag: 'Configuraciones y Reformas Laborales', title: 'Impacto de la flexibilización laboral en la clase trabajadora regional y la reproducción de la vida', date: '04 Nov 2026', source: 'ANRoca', url: 'https://www.anroca.com.ar/', snippet: 'Reconfiguración de las condiciones de trabajo, pérdida de garantías y precarización en sectores clave de Neuquén y Río Negro.' },
+  { id: 'base-4', tag: 'Políticas de Inversión (RIGI / Súper RIGI)', title: 'Inversiones extraordinarias y asimetrías regionales: los saldos del RIGI en la Norpatagonia', date: '28 Oct 2026', source: 'VacaMuerta.ar', url: 'https://vacamuerta.ar/', snippet: 'Discusión teórica y práctica sobre los incentivos fiscales y el abismo de desigualdad en la estructura productiva.' },
+  { id: 'base-5', tag: 'Perspectiva de Género', title: 'Organización comunitaria y feminismos populares frente a la crisis y ajuste en la Patagonia', date: '20 Oct 2026', source: 'elDiarioAR', url: 'https://www.eldiarioar.com/', snippet: 'Reflexiones sobre las tareas de cuidado, la división sexual del trabajo y la resistencia colectiva.' },
+  { id: 'base-6', tag: 'UNCo (Fiske Menuco / Neuquén)', title: 'Posicionamiento de la comunidad FADECS-UNCo en defensa de la educación pública y la función social', date: '15 Oct 2026', source: 'UNCo Informa', url: 'https://neuqueninforma.gob.ar/', snippet: 'Articulación entre conocimiento académico, extensión crítica y compromiso territorial en Fiske Menuco.' }
 ];
 
-// Consultas RSS con filtro de género blindado contra ruido (accidentes, papas, etc.)
+// Consultas RSS afinadas con exclusión directa de términos no deseados
 const thematicFeeds = [
   {
-    tag: 'Ambiente y Extractivismo',
-    rss: 'https://news.google.com/rss/search?q=(extractivismo+OR+ambiental+OR+contaminacion+OR+fracking+OR+"Golfo+San+Matias"+OR+agua)+site:(rionegro.com.ar+OR+anroca.com.ar+OR+mejorinformado.com+OR+elcordillerano.com.ar+OR+adnrionegro.com.ar)&hl=es-419&gl=AR&ceid=AR:es-419'
+    tag: 'Extractivismo y Minería',
+    rss: 'https://news.google.com/rss/search?q=(extractivismo+OR+mineria+OR+fracking+OR+ambiental+OR+agua+-accidente+-choque+-policial)+site:(rionegro.com.ar+OR+anroca.com.ar+OR+mejorinformado.com+OR+elcordillerano.com.ar)&hl=es-419&gl=AR&ceid=AR:es-419'
   },
   {
-    tag: 'Comunidades Originarias',
-    rss: 'https://news.google.com/rss/search?q=(mapuche+OR+"comunidades+originarias"+OR+"pueblos+originarios"+OR+territorio+OR+Lof)+site:(eldiarioar.com+OR+rionegro.com.ar+OR+anroca.com.ar+OR+adnrionegro.com.ar)&hl=es-419&gl=AR&ceid=AR:es-419'
+    tag: 'Desigualdades Socio-Territoriales',
+    rss: 'https://news.google.com/rss/search?q=(pobreza+OR+desigualdad+OR+alquileres+OR+vivienda+OR+"barrios+populares"+OR+tomas+-accidente+-choque)+site:(rionegro.com.ar+OR+anroca.com.ar+OR+mejorinformado.com)&hl=es-419&gl=AR&ceid=AR:es-419'
   },
   {
-    tag: 'Políticas de Inversión (RIGI)',
-    rss: 'https://news.google.com/rss/search?q=(RIGI+OR+"Super+RIGI"+OR+"Vaca+Muerta"+inversiones)+site:(rionegro.com.ar+OR+mejorinformado.com+OR+lmcipolletti.com.ar+OR+adnrionegro.com.ar)&hl=es-419&gl=AR&ceid=AR:es-419'
+    tag: 'Configuraciones y Reformas Laborales',
+    rss: 'https://news.google.com/rss/search?q=("reforma+laboral"+OR+precarizacion+OR+despidos+OR+sindicatos+OR+trabajadores+OR+empleo+-accidente+-choque)+site:(rionegro.com.ar+OR+anroca.com.ar+OR+elperiodicoderincon.com.ar)&hl=es-419&gl=AR&ceid=AR:es-419'
   },
   {
-    tag: 'Reconfiguración Laboral',
-    rss: 'https://news.google.com/rss/search?q=("reforma+laboral"+OR+precarizacion+OR+despidos+OR+gremios+OR+sindicatos+OR+trabajadores)+site:(rionegro.com.ar+OR+anroca.com.ar+OR+elperiodicoderincon.com.ar+OR+mejorinformado.com)&hl=es-419&gl=AR&ceid=AR:es-419'
-  },
-  {
-    tag: 'Desigualdad Socio-territorial',
-    rss: 'https://news.google.com/rss/search?q=(pobreza+OR+desigualdad+OR+alquileres+OR+vivienda+OR+"barrios+populares"+OR+tomas)+site:(rionegro.com.ar+OR+anroca.com.ar+OR+elcordillerano.com.ar+OR+mejorinformado.com)&hl=es-419&gl=AR&ceid=AR:es-419'
+    tag: 'Políticas de Inversión (RIGI / Súper RIGI)',
+    rss: 'https://news.google.com/rss/search?q=(RIGI+OR+"Super+RIGI"+OR+"Vaca+Muerta"+inversiones+-accidente+-futbol)+site:(rionegro.com.ar+OR+mejorinformado.com+OR+lmcipolletti.com.ar)&hl=es-419&gl=AR&ceid=AR:es-419'
   },
   {
     tag: 'Perspectiva de Género',
-    rss: 'https://news.google.com/rss/search?q=("perspectiva+de+genero"+OR+"violencia+de+genero"+OR+feminismos+OR+disidencias+OR+"tareas+de+cuidado"+OR+colectivo+feminista)+("Rio+Negro"+OR+Neuquen)&hl=es-419&gl=AR&ceid=AR:es-419'
+    rss: 'https://news.google.com/rss/search?q=("perspectiva+de+genero"+OR+"violencia+de+genero"+OR+feminismos+OR+disidencias+OR+"tareas+de+cuidado"+-accidente+-choque+-fallecido)+("Rio+Negro"+OR+Neuquen)&hl=es-419&gl=AR&ceid=AR:es-419'
   },
   {
     tag: 'UNCo (Fiske Menuco / Neuquén)',
-    rss: 'https://news.google.com/rss/search?q=("Universidad+Nacional+del+Comahue"+OR+UNCo+OR+FADECS+OR+"General+Roca"+OR+"Fiske+Menuco"+OR+Neuquen)+universidad&hl=es-419&gl=AR&ceid=AR:es-419'
+    rss: 'https://news.google.com/rss/search?q=("Universidad+Nacional+del+Comahue"+OR+UNCo+OR+FADECS+OR+"General+Roca"+OR+"Fiske+Menuco"+OR+Neuquen)+universidad+-accidente+-futbol&hl=es-419&gl=AR&ceid=AR:es-419'
   }
 ];
 
@@ -139,7 +164,7 @@ const FadecsWorkspace = () => {
     await setDoc(doc(db, 'config', 'general'), { roomsCount: boundedCount }, { merge: true });
   };
 
-  // 4. Búsqueda automática filtrada por ejes
+  // 4. Búsqueda automática con doble filtro metodológico (RSS + Validación interna)
   const fetchLiveNews = async () => {
     setLoadingNews(true);
     try {
@@ -148,21 +173,24 @@ const FadecsWorkspace = () => {
         const res = await fetch(apiUrl);
         const data = await res.json();
         if (data.items) {
-          return data.items.slice(0, 3).map((item, idx) => {
-            const titleParts = item.title.split(' - ');
-            const cleanTitle = titleParts.length > 1 ? titleParts.slice(0, -1).join(' - ') : item.title;
-            const sourceName = titleParts.length > 1 ? titleParts[titleParts.length - 1] : (item.author || 'Medio Regional');
+          return data.items
+            .filter(item => passesStrictFilter(item.title, item.description || '', feed.tag))
+            .slice(0, 4)
+            .map((item, idx) => {
+              const titleParts = item.title.split(' - ');
+              const cleanTitle = titleParts.length > 1 ? titleParts.slice(0, -1).join(' - ') : item.title;
+              const sourceName = titleParts.length > 1 ? titleParts[titleParts.length - 1] : (item.author || 'Medio Regional');
 
-            return {
-              id: `${feed.tag}-${idx}-${Date.now()}`,
-              tag: feed.tag,
-              title: cleanTitle,
-              date: new Date(item.pubDate).toLocaleDateString('es-AR', { day: 'numeric', month: 'short', year: 'numeric' }),
-              source: sourceName,
-              url: sanitizeHttpUrl(item.link),
-              snippet: `Nota periodística vinculada al eje de ${feed.tag} en la región patagónica.`
-            };
-          });
+              return {
+                id: `${feed.tag}-${idx}-${Date.now()}`,
+                tag: feed.tag,
+                title: cleanTitle,
+                date: new Date(item.pubDate).toLocaleDateString('es-AR', { day: 'numeric', month: 'short', year: 'numeric' }),
+                source: sourceName,
+                url: sanitizeHttpUrl(item.link),
+                snippet: item.description ? item.description.replace(/<[^>]+>/g, '').slice(0, 140) + '...' : `Análisis crítico vinculado al eje de ${feed.tag}.`
+              };
+            });
         }
         return [];
       });
@@ -279,11 +307,10 @@ const FadecsWorkspace = () => {
 
   const categories = [
     'Todas', 
-    'Ambiente y Extractivismo', 
-    'Comunidades Originarias', 
-    'Políticas de Inversión (RIGI)', 
-    'Reconfiguración Laboral', 
-    'Desigualdad Socio-territorial',
+    'Extractivismo y Minería', 
+    'Desigualdades Socio-Territoriales', 
+    'Configuraciones y Reformas Laborales', 
+    'Políticas de Inversión (RIGI / Súper RIGI)', 
     'Perspectiva de Género',
     'UNCo (Fiske Menuco / Neuquén)'
   ];
@@ -377,8 +404,8 @@ const FadecsWorkspace = () => {
           <div className="flex-1 overflow-y-auto p-4 md:p-8 bg-orange-50/50">
             <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-4">
               <div>
-                <h2 className="text-2xl md:text-3xl font-bold text-orange-800">Actualidad Regional por Ejes Temáticos</h2>
-                <p className="text-xs md:text-sm text-orange-600 mt-1">Monitoreo de medios patagónicos, género y novedades de la UNCo (Fiske Menuco y Neuquén).</p>
+                <h2 className="text-2xl md:text-3xl font-bold text-orange-800">Actualidad Regional y Ejes Metodológicos</h2>
+                <p className="text-xs md:text-sm text-orange-600 mt-1">Análisis territorial crítico, extractivismo, desigualdades, trabajo, género y vida universitaria (UNCo).</p>
               </div>
               <div className="flex flex-wrap gap-2">
                 <button onClick={fetchLiveNews} className="px-3 py-2 bg-orange-200 text-orange-900 rounded-lg font-semibold text-xs md:text-sm hover:bg-orange-300 transition-colors">
@@ -580,4 +607,4 @@ const FadecsWorkspace = () => {
   );
 };
 
-export default FadecsWorkspace;
+export Date FadecsWorkspace; // (Nota: mantener export default FadecsWorkspace al final)
