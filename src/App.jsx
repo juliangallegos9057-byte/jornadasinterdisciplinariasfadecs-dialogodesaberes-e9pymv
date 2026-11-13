@@ -71,22 +71,19 @@ const isValidGoogleUrl = (urlString) => {
   }
 };
 
-// Sanitizador y validador de enlaces externos (evita enlaces rotos o protocolos inseguros)
-const sanitizeHttpUrl = (urlString, fallbackUrl = 'https://www.rionegro.com.ar/') => {
-  if (!urlString || typeof urlString !== 'string') return fallbackUrl;
+// Sanitizador de enlaces externos de noticias (conserva el enlace directo de la nota)
+const sanitizeHttpUrl = (urlString) => {
+  if (!urlString || typeof urlString !== 'string') return '#';
   const trimmed = urlString.trim();
-  if (trimmed === '#' || trimmed === '') return fallbackUrl;
+  if (trimmed === '#' || trimmed === '') return '#';
   try {
     const parsed = new URL(trimmed);
     if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
-      return fallbackUrl;
-    }
-    if (parsed.hostname.includes('localhost') || parsed.hostname.includes('127.0.0.1')) {
-      return fallbackUrl;
+      return '#';
     }
     return trimmed;
   } catch {
-    return fallbackUrl;
+    return '#';
   }
 };
 
@@ -97,8 +94,7 @@ const globalExclusions = [
   'clima', 'pronostico', 'meteorologico', 'futbol', 'torneo', 'partido', 'colapinto',
   'papa francisco', 'vaticano', 'espectaculo', 'famosos', 'farandula', 'horoscopo',
   'arroyo', 'cayo al', 'cruzar el', 'cruzaba', 'rescate', 'rescataron', 'bomberos',
-  'ahogado', 'desaparecido', 'buscan a', 'ambulancia', 'heridos', 'hospitalizaron',
-  '404', 'not found', 'pagina no encontrada'
+  'ahogado', 'desaparecido', 'buscan a', 'ambulancia', 'heridos', 'hospitalizaron'
 ];
 
 // Validador metodológico estricto por intersección conceptual
@@ -163,7 +159,7 @@ const passesStrictFilter = (title, snippet, category) => {
   return true;
 };
 
-// Noticias base con portales activos (sin enlaces profundos propensos a 404)
+// Noticias base metodológicas curadas
 const fallbackNews = [
   {
     id: 'base-extract-1',
@@ -234,32 +230,26 @@ const fallbackNews = [
 const thematicFeeds = [
   {
     tag: 'Extractivismo y Minería',
-    fallbackUrl: 'https://agencia.farco.org.ar/',
     rss: 'https://news.google.com/rss/search?q=(extractivismo+OR+megamineria+OR+fracking+OR+"Golfo+San+Matias"+OR+Calcatreu)+(agua+OR+ambiental+OR+comunidades+OR+contaminacion)+("Rio+Negro"+OR+Neuquen)+-accidente+-choque+-policial&hl=es-419&gl=AR&ceid=AR:es-419'
   },
   {
     tag: 'Desigualdades Socio-Territoriales',
-    fallbackUrl: 'https://www.anroca.com.ar/',
     rss: 'https://news.google.com/rss/search?q=(desigualdad+OR+pobreza+OR+"crisis+habitacional"+OR+alquileres+OR+"barrios+populares")+("Rio+Negro"+OR+Neuquen)+-accidente+-choque+-policial&hl=es-419&gl=AR&ceid=AR:es-419'
   },
   {
     tag: 'Configuraciones y Reformas Laborales',
-    fallbackUrl: 'https://www.rionegro.com.ar/',
     rss: 'https://news.google.com/rss/search?q=("reforma+laboral"+OR+precarizacion+OR+despidos+OR+paritarias+OR+sindicatos)+("Rio+Negro"+OR+Neuquen)+-accidente+-choque+-policial&hl=es-419&gl=AR&ceid=AR:es-419'
   },
   {
     tag: 'Políticas de Inversión (RIGI / Súper RIGI)',
-    fallbackUrl: 'https://vacamuerta.ar/',
     rss: 'https://news.google.com/rss/search?q=(RIGI+OR+"Super+RIGI")+(inversiones+OR+"Vaca+Muerta"+OR+mineria)+("Rio+Negro"+OR+Neuquen)+-accidente+-futbol&hl=es-419&gl=AR&ceid=AR:es-419'
   },
   {
     tag: 'Perspectiva de Género',
-    fallbackUrl: 'https://www.eldiarioar.com/',
     rss: 'https://news.google.com/rss/search?q=("perspectiva+de+genero"+OR+"violencia+de+genero"+OR+feminismo+OR+disidencias+OR+"tareas+de+cuidado")+("Rio+Negro"+OR+Neuquen)+-accidente+-choque+-vial+-papa&hl=es-419&gl=AR&ceid=AR:es-419'
   },
   {
     tag: 'UNCo (Fiske Menuco / Neuquén)',
-    fallbackUrl: 'https://www.uncoma.edu.ar/',
     rss: 'https://news.google.com/rss/search?q=("Universidad+Nacional+del+Comahue"+OR+UNCo+OR+FADECS)+("General+Roca"+OR+"Fiske+Menuco"+OR+Neuquen)+-accidente+-choque+-futbol&hl=es-419&gl=AR&ceid=AR:es-419'
   }
 ];
@@ -329,7 +319,7 @@ const FadecsWorkspace = () => {
     }
   };
 
-  // 4. Búsqueda automática con filtro metodológico, deduplicación y caché
+  // 4. Búsqueda automática con separación título/medio y enlace directo de la nota
   const fetchLiveNews = async (forceRefresh = false) => {
     const now = Date.now();
     if (!forceRefresh && now - lastFetchTimeRef.current < NEWS_CACHE_TTL_MS) {
@@ -347,10 +337,12 @@ const FadecsWorkspace = () => {
 
         return data.items
           .map((item) => {
-            const titleParts = (item.title || '').split(' - ');
-            const cleanTitle = titleParts.length > 1 ? titleParts.slice(0, -1).join(' - ').trim() : (item.title || '').trim();
+            const rawTitle = item.title || '';
+            const titleParts = rawTitle.split(' - ');
+            const cleanTitle = titleParts.length > 1 ? titleParts.slice(0, -1).join(' - ').trim() : rawTitle.trim();
             const sourceName = titleParts.length > 1 ? titleParts[titleParts.length - 1].trim() : (item.author || 'Medio Regional');
             const cleanDesc = stripHtml(item.description || '');
+            const directLink = sanitizeHttpUrl(item.link);
 
             return {
               id: createDeterministicHash(`${feed.tag}-${cleanTitle}`),
@@ -358,11 +350,11 @@ const FadecsWorkspace = () => {
               title: cleanTitle,
               date: item.pubDate ? new Date(item.pubDate).toLocaleDateString('es-AR', { day: 'numeric', month: 'short', year: 'numeric' }) : 'Actualidad',
               source: sourceName,
-              url: sanitizeHttpUrl(item.link, feed.fallbackUrl),
+              url: directLink,
               snippet: cleanDesc.length > 25 ? cleanDesc.slice(0, 160) + '...' : `Artículo periodístico vinculado al eje ${feed.tag} en la región.`
             };
           })
-          .filter(article => passesStrictFilter(article.title, article.snippet, feed.tag))
+          .filter(article => article.url !== '#' && passesStrictFilter(article.title, article.snippet, feed.tag))
           .slice(0, 3);
       });
 
@@ -673,7 +665,7 @@ const FadecsWorkspace = () => {
               </div>
             )}
 
-            {/* ZONA DE DOCUMENTO */}
+            {/* ZONA DE DOCUMENTO (AMBAS OPCIONES: VISOR INCRUSTADO + BOTÓN EXTERNO) */}
             {currentView.startsWith('sala-') && (
               <div className={`${mobileRoomTab === 'doc' ? 'flex' : 'hidden'} md:flex flex-1 flex-col border-r border-orange-200 bg-white h-full overflow-hidden`}>
                 <div className="p-3 md:p-4 bg-orange-100/30 border-b border-orange-200">
