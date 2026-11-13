@@ -1,9 +1,9 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { initializeApp } from 'firebase/app';
 import { getAuth, GoogleAuthProvider, signInWithPopup, signOut, onAuthStateChanged } from 'firebase/auth';
-import { getFirestore, collection, addDoc, query, orderBy, onSnapshot, serverTimestamp, doc, setDoc } from 'firebase/firestore';
+import { getFirestore, collection, addDoc, query, orderBy, onSnapshot, serverTimestamp, doc, setDoc, deleteDoc, updateDoc } from 'firebase/firestore';
 
-// 1. Tu Configuración de Firebase
+// 1. Configuración de Firebase
 const firebaseConfig = {
   apiKey: "AIzaSyCEi-f72oL1fTChwwRUpcSeinlw7UNcZS4",
   authDomain: "jornadas-interdisciplinarias.firebaseapp.com",
@@ -19,6 +19,14 @@ const auth = getAuth(app);
 const db = getFirestore(app);
 const provider = new GoogleAuthProvider();
 
+// Noticias de respaldo por si falla la conexión RSS
+const fallbackNews = [
+  { id: '1', tag: 'Ambiente y Extractivismo', title: 'Audiencia contra los proyectos extractivistas y en defensa del Golfo San Matías', date: '12 Nov 2026', source: 'Agencia Farco', url: 'https://agencia.farco.org.ar/2026/11/12/rio-negro-hoy-una-audiencia-contra-los-proyectos-extractivistas-y-en-defensa-del-golfo-san-matias/', snippet: 'Se realiza una audiencia contra los proyectos extractivistas y en defensa del Golfo San Matías en la previa de la audiencia oficial.' },
+  { id: '2', tag: 'Inversiones RIGI', title: 'Neuquén y Río Negro capturan el 56% del RIGI con Vaca Muerta', date: '9 Nov 2026', source: 'VacaMuerta.ar', url: 'https://vacamuerta.ar/neuquen-y-rio-negro-capturan-el-56-del-rigi-con-vaca-muerta/', snippet: 'Ambas provincias patagónicas concentran USD 43.100 millones de los 27 proyectos aprobados bajo el régimen de incentivos (RIGI).' },
+  { id: '3', tag: 'Reforma Laboral', title: 'Juicios laborales en Río Negro: aumentaron las causas tras la reforma', date: '19 Oct 2026', source: 'Diario Río Negro', url: 'https://www.rionegro.com.ar/politica/juicios-laborales-en-rio-negro-aumentaron-las-causas-y-hubo-un-salto-en-los-acuerdos-de-conciliacion/', snippet: 'La Justicia laboral registró más ingresos de causas coincidiendo con los primeros meses de vigencia de la reforma laboral nacional.' },
+  { id: '4', tag: 'Desigualdad Socio-territorial', title: 'Índice de pobreza: qué pasó en Neuquén, Río Negro y la Patagonia', date: '24 Sep 2026', source: 'Diario Río Negro', url: 'https://www.rionegro.com.ar/economia/indice-de-pobreza-e-indigencia-que-paso-en-neuquen-rio-negro-y-la-patagonia-en-el-primer-semestre-del-2026-4735560/', snippet: 'Los datos revelan realidades muy dispares entre los distintos polos productivos, administrativos y turísticos del sur del país.' }
+];
+
 const FadecsWorkspace = () => {
   const [user, setUser] = useState(null);
   const [currentView, setCurrentView] = useState('chat-general');
@@ -27,9 +35,18 @@ const FadecsWorkspace = () => {
   const [docInput, setDocInput] = useState('');
   const [messages, setMessages] = useState([]);
   const [newMessage, setNewMessage] = useState('');
-  const chatEndRef = useRef(null);
+  
+  // Estados para edición de mensajes
+  const [editingMsgId, setEditingMsgId] = useState(null);
+  const [editingText, setEditingText] = useState('');
 
-  // Tu correo como administrador primordial (solo tú verás los botones + y -)
+  // Estados para diseño adaptable (móvil) y noticias en vivo
+  const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
+  const [mobileRoomTab, setMobileRoomTab] = useState('chat'); // 'doc' o 'chat'
+  const [newsList, setNewsList] = useState(fallbackNews);
+  const [loadingNews, setLoadingNews] = useState(false);
+
+  const chatEndRef = useRef(null);
   const isAdmin = user?.email === 'juliangallegos9057@gmail.com';
 
   // 2. Control de Sesión
@@ -43,7 +60,7 @@ const FadecsWorkspace = () => {
   const login = () => signInWithPopup(auth, provider);
   const logout = () => signOut(auth);
 
-  // 3. Sincronización de Cantidad de Salas (Global)
+  // 3. Sincronización de Cantidad de Salas
   useEffect(() => {
     if (!user) return;
     const unsub = onSnapshot(doc(db, 'config', 'general'), (docSnap) => {
@@ -60,18 +77,46 @@ const FadecsWorkspace = () => {
     await setDoc(doc(db, 'config', 'general'), { roomsCount: newCount }, { merge: true });
   };
 
-  // 4. Sincronización de Chat y Documentos por Sala
+  // 4. Actualización automática de noticias regionales vía RSS
+  const fetchLiveNews = async () => {
+    setLoadingNews(true);
+    try {
+      const res = await fetch('https://api.rss2json.com/v1/api.json?rss_url=https://www.rionegro.com.ar/feed/');
+      const data = await res.json();
+      if (data.items && data.items.length > 0) {
+        const liveItems = data.items.slice(0, 6).map((item, idx) => ({
+          id: `live-${idx}`,
+          tag: 'Actualidad Regional',
+          title: item.title,
+          date: new Date(item.pubDate).toLocaleDateString('es-AR', { day: 'numeric', month: 'short' }),
+          source: 'Diario Río Negro',
+          url: item.link,
+          snippet: item.description ? item.description.replace(/<[^>]+>/g, '').slice(0, 140) + '...' : 'Click para leer la nota completa en el portal.'
+        }));
+        setNewsList([...liveItems, ...fallbackNews]);
+      }
+    } catch (err) {
+      console.error('Usando noticias de respaldo:', err);
+    }
+    setLoadingNews(false);
+  };
+
+  useEffect(() => {
+    if (currentView === 'noticias') {
+      fetchLiveNews();
+    }
+  }, [currentView]);
+
+  // 5. Sincronización de Chat y Documentos por Sala
   useEffect(() => {
     if (!user || currentView === 'noticias') return;
 
-    // Cargar Chat
     const q = query(collection(db, 'salas', currentView, 'mensajes'), orderBy('createdAt', 'asc'));
     const unsubChat = onSnapshot(q, (snapshot) => {
       setMessages(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
       setTimeout(() => chatEndRef.current?.scrollIntoView({ behavior: 'smooth' }), 100);
     });
 
-    // Cargar Documento (solo en salas de monografía)
     let unsubDoc = () => {};
     if (currentView.startsWith('sala-')) {
       unsubDoc = onSnapshot(doc(db, 'salas', currentView), (docSnap) => {
@@ -86,7 +131,7 @@ const FadecsWorkspace = () => {
     return () => { unsubChat(); unsubDoc(); };
   }, [currentView, user]);
 
-  // 5. Funciones de envío
+  // 6. Enviar, Editar y Borrar Mensajes
   const sendMessage = async (e) => {
     e.preventDefault();
     if (!newMessage.trim()) return;
@@ -100,11 +145,26 @@ const FadecsWorkspace = () => {
     });
   };
 
-  // Noticias estáticas
-  const newsData = [
-    { id: 1, tag: 'Ambiente', title: 'Audiencia en defensa del Golfo San Matías', date: 'Nov 2026', source: 'Agencia Farco', url: 'https://agencia.farco.org.ar/2026/11/12/rio-negro-hoy-una-audiencia-contra-los-proyectos-extractivistas-y-en-defensa-del-golfo-san-matias/', snippet: 'Se realiza una audiencia contra los proyectos extractivistas en Río Negro.' },
-    { id: 2, tag: 'RIGI', title: 'Neuquén y Río Negro capturan el 56% del RIGI', date: 'Nov 2026', source: 'VacaMuerta.ar', url: 'https://vacamuerta.ar/neuquen-y-rio-negro-capturan-el-56-del-rigi-con-vaca-muerta/', snippet: 'Proyectos aprobados bajo el régimen de incentivos traccionados por Vaca Muerta.' }
-  ];
+  const handleDeleteMessage = async (msgId) => {
+    if (window.confirm('¿Seguro que deseas eliminar este mensaje?')) {
+      await deleteDoc(doc(db, 'salas', currentView, 'mensajes', msgId));
+    }
+  };
+
+  const startEditMessage = (msg) => {
+    setEditingMsgId(msg.id);
+    setEditingText(msg.text);
+  };
+
+  const saveEditMessage = async (msgId) => {
+    if (!editingText.trim()) return;
+    await updateDoc(doc(db, 'salas', currentView, 'mensajes', msgId), {
+      text: editingText,
+      edited: true
+    });
+    setEditingMsgId(null);
+    setEditingText('');
+  };
 
   const handleDocSubmit = async (e) => {
     e.preventDefault();
@@ -113,13 +173,19 @@ const FadecsWorkspace = () => {
     await setDoc(doc(db, 'salas', currentView), { docUrl: docInput }, { merge: true });
   };
 
+  const selectView = (view) => {
+    setCurrentView(view);
+    setIsMobileMenuOpen(false);
+    setEditingMsgId(null);
+  };
+
   // PANTALLA DE LOGIN
   if (!user) {
     return (
-      <div className="flex h-screen bg-orange-50 items-center justify-center font-sans">
-        <div className="bg-white p-8 rounded-xl shadow-lg border border-orange-200 text-center max-w-md w-full">
-          <h1 className="text-3xl font-bold text-orange-800 mb-2">JIFADECS 2026</h1>
-          <p className="text-orange-600 mb-8">Diálogo de saberes para los desafíos contemporáneos</p>
+      <div className="flex h-screen bg-orange-50 items-center justify-center font-sans p-4">
+        <div className="bg-white p-6 md:p-8 rounded-xl shadow-lg border border-orange-200 text-center max-w-md w-full">
+          <h1 className="text-2xl md:text-3xl font-bold text-orange-800 mb-2">JIFADECS 2026</h1>
+          <p className="text-sm md:text-base text-orange-600 mb-8">Diálogo de saberes para los desafíos contemporáneos</p>
           <button onClick={login} className="w-full bg-orange-500 text-white font-bold py-3 px-4 rounded-lg hover:bg-orange-600 transition-colors shadow-md">
             Iniciar sesión con Google
           </button>
@@ -128,12 +194,27 @@ const FadecsWorkspace = () => {
     );
   }
 
-  // INTERFAZ PRINCIPAL
+  // INTERFAZ PRINCIPAL ADAPTABLE (PC Y MÓVIL)
   return (
-    <div className="flex h-screen bg-orange-50 font-sans text-orange-900">
-      {/* BARRA LATERAL */}
-      <div className="w-64 bg-orange-100 border-r border-orange-200 flex flex-col shadow-sm">
-        <div className="p-4 border-b border-orange-200 bg-orange-200/50">
+    <div className="flex flex-col md:flex-row h-screen bg-orange-50 font-sans text-orange-900 overflow-hidden">
+      
+      {/* CABECERA MÓVIL (Solo visible en celulares) */}
+      <div className="md:hidden flex items-center justify-between p-3 bg-orange-200 border-b border-orange-300 shadow-sm z-20">
+        <div>
+          <h1 className="text-lg font-bold text-orange-900 leading-tight">JIFADECS 2026</h1>
+          <p className="text-[11px] text-orange-700 truncate max-w-[200px]">{user.displayName}</p>
+        </div>
+        <button 
+          onClick={() => setIsMobileMenuOpen(!isMobileMenuOpen)} 
+          className="px-3 py-1.5 bg-orange-500 text-white rounded-md font-bold text-sm shadow"
+        >
+          {isMobileMenuOpen ? '✕ Cerrar' : '☰ Menú / Salas'}
+        </button>
+      </div>
+
+      {/* BARRA LATERAL (Fija en PC, desplegable en Celular) */}
+      <div className={`${isMobileMenuOpen ? 'fixed inset-0 top-[57px] z-30 flex' : 'hidden'} md:relative md:top-0 md:flex w-full md:w-64 bg-orange-100 border-r border-orange-200 flex-col shadow-sm`}>
+        <div className="hidden md:block p-4 border-b border-orange-200 bg-orange-200/50">
           <h1 className="text-xl font-bold text-orange-800">JIFADECS 2026</h1>
           <p className="text-xs text-orange-700 mt-1 truncate">{user.displayName}</p>
           <button onClick={logout} className="text-xs text-orange-500 hover:text-orange-800 mt-2 font-semibold">Cerrar sesión</button>
@@ -141,95 +222,182 @@ const FadecsWorkspace = () => {
         
         <div className="flex-1 overflow-y-auto p-4 space-y-4">
           <div>
-            <h2 className="text-sm font-semibold text-orange-500 uppercase tracking-wider mb-2">General</h2>
-            <button onClick={() => setCurrentView('chat-general')} className={`w-full text-left px-3 py-2 rounded-md transition-colors ${currentView === 'chat-general' ? 'bg-orange-500 text-white shadow' : 'hover:bg-orange-200 text-orange-800'}`}>💬 Chat General</button>
-            <button onClick={() => setCurrentView('noticias')} className={`w-full text-left px-3 py-2 rounded-md transition-colors mt-1 ${currentView === 'noticias' ? 'bg-orange-500 text-white shadow' : 'hover:bg-orange-200 text-orange-800'}`}>📰 Noticias y Contexto</button>
+            <h2 className="text-xs font-semibold text-orange-500 uppercase tracking-wider mb-2">General</h2>
+            <button onClick={() => selectView('chat-general')} className={`w-full text-left px-3 py-2.5 rounded-md transition-colors text-sm font-medium ${currentView === 'chat-general' ? 'bg-orange-500 text-white shadow' : 'hover:bg-orange-200 text-orange-800'}`}>💬 Chat General</button>
+            <button onClick={() => selectView('noticias')} className={`w-full text-left px-3 py-2.5 rounded-md transition-colors mt-1 text-sm font-medium ${currentView === 'noticias' ? 'bg-orange-500 text-white shadow' : 'hover:bg-orange-200 text-orange-800'}`}>📰 Noticias y Diarios</button>
           </div>
 
           <div>
             <div className="flex items-center justify-between mb-2">
-              <h2 className="text-sm font-semibold text-orange-500 uppercase tracking-wider">Grupos</h2>
+              <h2 className="text-xs font-semibold text-orange-500 uppercase tracking-wider">Grupos de Trabajo</h2>
               {isAdmin && (
                 <div className="flex space-x-1">
-                  <button onClick={() => updateRoomsCount(Math.max(1, roomsCount - 1))} className="px-2 py-0.5 bg-orange-300 text-orange-900 rounded hover:bg-orange-400 font-bold">-</button>
-                  <button onClick={() => updateRoomsCount(roomsCount + 1)} className="px-2 py-0.5 bg-orange-300 text-orange-900 rounded hover:bg-orange-400 font-bold">+</button>
+                  <button onClick={() => updateRoomsCount(Math.max(1, roomsCount - 1))} className="px-2.5 py-0.5 bg-orange-300 text-orange-900 rounded hover:bg-orange-400 font-bold">-</button>
+                  <button onClick={() => updateRoomsCount(roomsCount + 1)} className="px-2.5 py-0.5 bg-orange-300 text-orange-900 rounded hover:bg-orange-400 font-bold">+</button>
                 </div>
               )}
             </div>
             <div className="space-y-1">
               {Array.from({ length: roomsCount }).map((_, idx) => (
-                <button key={idx} onClick={() => setCurrentView(`sala-${idx + 1}`)} className={`w-full text-left px-3 py-2 rounded-md transition-colors ${currentView === `sala-${idx + 1}` ? 'bg-orange-500 text-white shadow' : 'hover:bg-orange-200 text-orange-800'}`}>
+                <button key={idx} onClick={() => selectView(`sala-${idx + 1}`)} className={`w-full text-left px-3 py-2.5 rounded-md transition-colors text-sm font-medium ${currentView === `sala-${idx + 1}` ? 'bg-orange-500 text-white shadow' : 'hover:bg-orange-200 text-orange-800'}`}>
                   📝 Monografía {idx + 1}
                 </button>
               ))}
             </div>
           </div>
+
+          <div className="md:hidden pt-4 border-t border-orange-200">
+            <button onClick={logout} className="w-full text-left px-3 py-2 text-sm text-red-600 font-semibold">Cerrar sesión</button>
+          </div>
         </div>
       </div>
 
       {/* ÁREA PRINCIPAL */}
-      <div className="flex-1 flex flex-col overflow-hidden">
+      <div className="flex-1 flex flex-col overflow-hidden h-full">
         {currentView === 'noticias' ? (
-          <div className="flex-1 overflow-y-auto p-8 bg-orange-50/50">
-            <h2 className="text-3xl font-bold text-orange-800 mb-6">Noticias y Contexto Regional</h2>
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-              {newsData.map(news => (
-                <div key={news.id} className="bg-white p-6 rounded-lg shadow-sm border border-orange-100 hover:shadow-md transition-shadow">
-                  <span className="inline-block px-2 py-1 bg-orange-100 text-orange-700 text-xs font-semibold rounded-full mb-3">{news.tag}</span>
-                  <h3 className="text-lg font-bold text-orange-900 mb-2">{news.title}</h3>
-                  <p className="text-orange-700 text-sm mb-4 line-clamp-3">{news.snippet}</p>
-                  <a href={news.url} target="_blank" rel="noreferrer" className="text-orange-500 font-semibold text-sm hover:text-orange-700">Leer artículo →</a>
+          <div className="flex-1 overflow-y-auto p-4 md:p-8 bg-orange-50/50">
+            <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-6">
+              <div>
+                <h2 className="text-2xl md:text-3xl font-bold text-orange-800">Noticias y Diarios del Día</h2>
+                <p className="text-xs md:text-sm text-orange-600 mt-1">Actualización automática de medios regionales y acceso al quiosco de diarios.</p>
+              </div>
+              <div className="flex flex-wrap gap-2">
+                <button onClick={fetchLiveNews} className="px-3 py-2 bg-orange-200 text-orange-900 rounded-lg font-semibold text-xs md:text-sm hover:bg-orange-300 transition-colors">
+                  {loadingNews ? '🔄 Actualizando...' : '🔄 Actualizar titulares'}
+                </button>
+                <a 
+                  href="https://www.diariosargentinos.com.ar/web" 
+                  target="_blank" 
+                  rel="noreferrer" 
+                  className="px-4 py-2 bg-orange-500 text-white rounded-lg font-bold text-xs md:text-sm hover:bg-orange-600 shadow transition-colors flex items-center gap-1"
+                >
+                  🗞️ Abrir Diarios Argentinos ↗
+                </a>
+              </div>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4 md:gap-6">
+              {newsList.map(news => (
+                <div key={news.id} className="bg-white p-4 md:p-6 rounded-lg shadow-sm border border-orange-100 hover:shadow-md transition-shadow flex flex-col justify-between">
+                  <div>
+                    <div className="flex items-center justify-between mb-2">
+                      <span className="inline-block px-2 py-0.5 bg-orange-100 text-orange-700 text-xs font-semibold rounded-full">{news.tag}</span>
+                      <span className="text-xs text-orange-400">{news.date} • {news.source}</span>
+                    </div>
+                    <h3 className="text-base md:text-lg font-bold text-orange-900 mb-2">{news.title}</h3>
+                    <p className="text-orange-700 text-xs md:text-sm mb-4 line-clamp-3">{news.snippet}</p>
+                  </div>
+                  <a href={news.url} target="_blank" rel="noreferrer" className="text-orange-500 font-semibold text-xs md:text-sm hover:text-orange-700 self-start">Leer artículo completo →</a>
                 </div>
               ))}
             </div>
           </div>
         ) : (
-          <div className="flex-1 flex h-full">
+          <div className="flex-1 flex flex-col md:flex-row h-full overflow-hidden">
             
-            {/* ZONA DE DOCUMENTO */}
+            {/* SELECTOR DE PESTAÑAS EN MÓVIL (Solo aparece en salas de Monografía en celulares) */}
             {currentView.startsWith('sala-') && (
-              <div className="flex-1 flex flex-col border-r border-orange-200 bg-white">
-                <div className="p-4 bg-orange-100/30 border-b border-orange-200">
-                  <div className="bg-yellow-50 border-l-4 border-yellow-400 p-2 mb-3">
-                    <p className="text-xs text-yellow-800">⚠️ Configura el Drive como <strong>"Cualquier persona con el enlace puede editar"</strong>.</p>
+              <div className="md:hidden flex border-b border-orange-200 bg-orange-100">
+                <button 
+                  onClick={() => setMobileRoomTab('doc')} 
+                  className={`flex-1 py-2.5 text-xs font-bold text-center border-b-2 ${mobileRoomTab === 'doc' ? 'border-orange-500 text-orange-900 bg-white' : 'border-transparent text-orange-600'}`}
+                >
+                  📄 Ver Documento
+                </button>
+                <button 
+                  onClick={() => setMobileRoomTab('chat')} 
+                  className={`flex-1 py-2.5 text-xs font-bold text-center border-b-2 ${mobileRoomTab === 'chat' ? 'border-orange-500 text-orange-900 bg-white' : 'border-transparent text-orange-600'}`}
+                >
+                  💬 Debate ({messages.length})
+                </button>
+              </div>
+            )}
+
+            {/* ZONA DE DOCUMENTO (Oculta en móvil si se está viendo el chat) */}
+            {currentView.startsWith('sala-') && (
+              <div className={`${mobileRoomTab === 'doc' ? 'flex' : 'hidden'} md:flex flex-1 flex-col border-r border-orange-200 bg-white h-full overflow-hidden`}>
+                <div className="p-3 md:p-4 bg-orange-100/30 border-b border-orange-200">
+                  <div className="bg-yellow-50 border-l-4 border-yellow-400 p-2 mb-2.5">
+                    <p className="text-xs text-yellow-800">
+                      ⚠️ <strong>Importante:</strong> Compartir este documento solo con los integrantes del grupo y coordinación.
+                    </p>
                   </div>
                   <form onSubmit={handleDocSubmit} className="flex gap-2">
-                    <input type="url" value={docInput} onChange={(e) => setDocInput(e.target.value)} placeholder="Pega el enlace de Google Docs..." className="flex-1 px-3 py-2 border border-orange-300 rounded text-sm focus:ring-2 focus:ring-orange-400 outline-none" />
-                    <button type="submit" className="px-4 py-2 bg-orange-500 text-white rounded font-semibold text-sm hover:bg-orange-600">Incrustar</button>
+                    <input type="url" value={docInput} onChange={(e) => setDocInput(e.target.value)} placeholder="Pega el enlace de Google Docs..." className="flex-1 px-3 py-1.5 md:py-2 border border-orange-300 rounded text-xs md:text-sm focus:ring-2 focus:ring-orange-400 outline-none" />
+                    <button type="submit" className="px-3 md:px-4 py-1.5 md:py-2 bg-orange-500 text-white rounded font-semibold text-xs md:text-sm hover:bg-orange-600 whitespace-nowrap">Incrustar</button>
                   </form>
                 </div>
-                <div className="flex-1 bg-gray-50 p-2">
+                <div className="flex-1 bg-gray-50 p-1 md:p-2 overflow-hidden">
                   {activeDocUrl ? (
                     <iframe src={activeDocUrl} className="w-full h-full border-0 rounded shadow-inner" title="Doc" />
                   ) : (
-                    <div className="h-full flex items-center justify-center text-orange-400 text-sm">No hay un documento activo.</div>
+                    <div className="h-full flex items-center justify-center text-orange-400 text-xs md:text-sm p-4 text-center">No hay un documento activo en esta sala.</div>
                   )}
                 </div>
               </div>
             )}
 
-            {/* ZONA DE CHAT */}
-            <div className={`${currentView === 'chat-general' ? 'w-full max-w-4xl mx-auto my-8 rounded-xl shadow-lg border' : 'w-96'} bg-white flex flex-col border-orange-200`}>
-              <div className="p-4 border-b border-orange-200 bg-orange-100/50">
-                <h3 className="font-bold text-orange-800 capitalize">
+            {/* ZONA DE CHAT (Para General y Monografías) */}
+            <div className={`${currentView.startsWith('sala-') && mobileRoomTab === 'doc' ? 'hidden md:flex' : 'flex'} ${currentView === 'chat-general' ? 'w-full max-w-4xl mx-auto md:my-6 md:rounded-xl md:shadow-lg md:border' : 'w-full md:w-96'} flex-1 md:flex-initial bg-white flex-col border-orange-200 h-full overflow-hidden`}>
+              <div className="p-3 md:p-4 border-b border-orange-200 bg-orange-100/50 flex justify-between items-center">
+                <h3 className="font-bold text-orange-800 text-sm md:text-base capitalize">
                   {currentView === 'chat-general' ? 'Chat General Interdisciplinario' : `Debate - ${currentView.replace('-', ' ')}`}
                 </h3>
               </div>
               
-              <div className="flex-1 p-4 overflow-y-auto bg-orange-50/30 flex flex-col gap-3">
+              <div className="flex-1 p-3 md:p-4 overflow-y-auto bg-orange-50/30 flex flex-col gap-3">
                 {messages.length === 0 && <div className="text-center text-xs text-orange-400 mt-4">Comienza el debate...</div>}
-                {messages.map((msg) => (
-                  <div key={msg.id} className={`max-w-[85%] p-3 rounded-lg text-sm ${msg.email === user.email ? 'bg-orange-500 text-white self-end rounded-tr-none shadow-sm' : 'bg-orange-100 text-orange-900 self-start rounded-tl-none border border-orange-200'}`}>
-                    <div className={`text-[10px] mb-1 font-bold ${msg.email === user.email ? 'text-orange-200' : 'text-orange-600'}`}>{msg.sender}</div>
-                    <div>{msg.text}</div>
-                  </div>
-                ))}
+                {messages.map((msg) => {
+                  const isMine = msg.email === user.email;
+                  return (
+                    <div key={msg.id} className={`max-w-[90%] md:max-w-[85%] p-2.5 md:p-3 rounded-lg text-xs md:text-sm ${isMine ? 'bg-orange-500 text-white self-end rounded-tr-none shadow-sm' : 'bg-orange-100 text-orange-900 self-start rounded-tl-none border border-orange-200'}`}>
+                      <div className="flex items-center justify-between gap-2 mb-1">
+                        <span className={`text-[10px] font-bold ${isMine ? 'text-orange-100' : 'text-orange-600'}`}>
+                          {msg.sender} {msg.edited && <span className="italic font-normal opacity-80">(editado)</span>}
+                        </span>
+                        
+                        {/* Botones de Editar y Borrar */}
+                        {(isMine || isAdmin) && editingMsgId !== msg.id && (
+                          <div className="flex items-center gap-1.5 opacity-80 hover:opacity-100">
+                            {isMine && (
+                              <button onClick={() => startEditMessage(msg)} title="Editar mensaje" className="hover:scale-110 transition-transform text-[11px]">
+                                ✏️
+                              </button>
+                            )}
+                            <button onClick={() => handleDeleteMessage(msg.id)} title="Borrar mensaje" className="hover:scale-110 transition-transform text-[11px]">
+                              🗑️
+                            </button>
+                          </div>
+                        )}
+                      </div>
+
+                      {/* Modo Edición vs Modo Lectura */}
+                      {editingMsgId === msg.id ? (
+                        <div className="mt-1 flex flex-col gap-1.5">
+                          <input 
+                            type="text" 
+                            value={editingText} 
+                            onChange={(e) => setEditingText(e.target.value)}
+                            className="w-full px-2 py-1 text-xs text-orange-900 bg-white rounded border border-orange-300 outline-none"
+                            autoFocus
+                          />
+                          <div className="flex justify-end gap-1 text-[10px]">
+                            <button onClick={() => setEditingMsgId(null)} className="px-2 py-0.5 bg-orange-700 text-white rounded">Cancelar</button>
+                            <button onClick={() => saveEditMessage(msg.id)} className="px-2 py-0.5 bg-white text-orange-600 font-bold rounded shadow">Guardar</button>
+                          </div>
+                        </div>
+                      ) : (
+                        <div className="break-words leading-relaxed">{msg.text}</div>
+                      )}
+                    </div>
+                  );
+                })}
                 <div ref={chatEndRef} />
               </div>
 
-              <form onSubmit={sendMessage} className="p-4 border-t border-orange-200 bg-white flex gap-2">
-                <input type="text" value={newMessage} onChange={(e) => setNewMessage(e.target.value)} placeholder="Escribe un mensaje..." className="flex-1 px-3 py-2 text-sm border border-orange-300 rounded focus:ring-2 focus:ring-orange-400 outline-none" />
-                <button type="submit" className="px-4 py-2 bg-orange-500 text-white rounded font-bold hover:bg-orange-600">→</button>
+              <form onSubmit={sendMessage} className="p-2.5 md:p-4 border-t border-orange-200 bg-white flex gap-2">
+                <input type="text" value={newMessage} onChange={(e) => setNewMessage(e.target.value)} placeholder="Escribe un mensaje..." className="flex-1 px-3 py-2 text-xs md:text-sm border border-orange-300 rounded focus:ring-2 focus:ring-orange-400 outline-none" />
+                <button type="submit" className="px-4 py-2 bg-orange-500 text-white rounded font-bold hover:bg-orange-600 text-sm">→</button>
               </form>
             </div>
 
