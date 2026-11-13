@@ -19,12 +19,36 @@ const auth = getAuth(app);
 const db = getFirestore(app);
 const provider = new GoogleAuthProvider();
 
-// Noticias de respaldo por si falla la conexión RSS
+// Noticias base curadas sobre los 5 ejes de las Jornadas
 const fallbackNews = [
-  { id: '1', tag: 'Ambiente y Extractivismo', title: 'Audiencia contra los proyectos extractivistas y en defensa del Golfo San Matías', date: '12 Nov 2026', source: 'Agencia Farco', url: 'https://agencia.farco.org.ar/2026/11/12/rio-negro-hoy-una-audiencia-contra-los-proyectos-extractivistas-y-en-defensa-del-golfo-san-matias/', snippet: 'Se realiza una audiencia contra los proyectos extractivistas y en defensa del Golfo San Matías en la previa de la audiencia oficial.' },
-  { id: '2', tag: 'Inversiones RIGI', title: 'Neuquén y Río Negro capturan el 56% del RIGI con Vaca Muerta', date: '9 Nov 2026', source: 'VacaMuerta.ar', url: 'https://vacamuerta.ar/neuquen-y-rio-negro-capturan-el-56-del-rigi-con-vaca-muerta/', snippet: 'Ambas provincias patagónicas concentran USD 43.100 millones de los 27 proyectos aprobados bajo el régimen de incentivos (RIGI).' },
-  { id: '3', tag: 'Reforma Laboral', title: 'Juicios laborales en Río Negro: aumentaron las causas tras la reforma', date: '19 Oct 2026', source: 'Diario Río Negro', url: 'https://www.rionegro.com.ar/politica/juicios-laborales-en-rio-negro-aumentaron-las-causas-y-hubo-un-salto-en-los-acuerdos-de-conciliacion/', snippet: 'La Justicia laboral registró más ingresos de causas coincidiendo con los primeros meses de vigencia de la reforma laboral nacional.' },
-  { id: '4', tag: 'Desigualdad Socio-territorial', title: 'Índice de pobreza: qué pasó en Neuquén, Río Negro y la Patagonia', date: '24 Sep 2026', source: 'Diario Río Negro', url: 'https://www.rionegro.com.ar/economia/indice-de-pobreza-e-indigencia-que-paso-en-neuquen-rio-negro-y-la-patagonia-en-el-primer-semestre-del-2026-4735560/', snippet: 'Los datos revelan realidades muy dispares entre los distintos polos productivos, administrativos y turísticos del sur del país.' }
+  { id: 'base-1', tag: 'Ambiente y Extractivismo', title: 'Audiencia contra los proyectos extractivistas y en defensa del Golfo San Matías', date: '12 Nov 2026', source: 'Agencia Farco', url: 'https://agencia.farco.org.ar/2026/11/12/rio-negro-hoy-una-audiencia-contra-los-proyectos-extractivistas-y-en-defensa-del-golfo-san-matias/', snippet: 'Comunidades y asambleas socioambientales exponen el impacto sobre el ecosistema marino y el uso del agua en la región.' },
+  { id: 'base-2', tag: 'Políticas de Inversión (RIGI)', title: 'Neuquén y Río Negro capturan el 56% del RIGI con Vaca Muerta', date: '9 Nov 2026', source: 'VacaMuerta.ar', url: 'https://vacamuerta.ar/neuquen-y-rio-negro-capturan-el-56-del-rigi-con-vaca-muerta/', snippet: 'Análisis del impacto fiscal y territorial de los proyectos aprobados bajo el régimen de incentivos a las grandes inversiones y el Súper RIGI.' },
+  { id: 'base-3', tag: 'Reconfiguración Laboral', title: 'Juicios laborales en Río Negro: aumentaron las causas tras la reforma', date: '19 Oct 2026', source: 'Diario Río Negro', url: 'https://www.rionegro.com.ar/politica/juicios-laborales-en-rio-negro-aumentaron-las-causas-y-hubo-un-salto-en-los-acuerdos-de-conciliacion/', snippet: 'El impacto de la reforma laboral nacional en los tribunales provinciales y las nuevas dinámicas de contratación y despidos.' },
+  { id: 'base-4', tag: 'Desigualdad Socio-territorial', title: 'Índice de pobreza: brechas entre polos extractivos y barrios populares en la Patagonia', date: '24 Sep 2026', source: 'Diario Río Negro', url: 'https://www.rionegro.com.ar/economia/indice-de-pobreza-e-indigencia-que-paso-en-neuquen-rio-negro-y-la-patagonia-en-el-primer-semestre-del-2026-4735560/', snippet: 'Los indicadores reflejan el contraste entre el crecimiento de la renta hidrocarburífera y la crisis habitacional y de servicios en el territorio.' }
+];
+
+// Consultas RSS específicas para los 5 ejes en Río Negro y Neuquén
+const thematicFeeds = [
+  {
+    tag: 'Ambiente y Extractivismo',
+    rss: 'https://news.google.com/rss/search?q=(extractivismo+OR+ambiental+OR+contaminacion+OR+fracking+OR+"Golfo+San+Matias"+OR+agua)+("Rio+Negro"+OR+Neuquen)&hl=es-419&gl=AR&ceid=AR:es-419'
+  },
+  {
+    tag: 'Comunidades Originarias',
+    rss: 'https://news.google.com/rss/search?q=(mapuche+OR+"comunidades+originarias"+OR+"pueblos+originarios"+OR+territorio+OR+Lof)+("Rio+Negro"+OR+Neuquen)&hl=es-419&gl=AR&ceid=AR:es-419'
+  },
+  {
+    tag: 'Políticas de Inversión (RIGI)',
+    rss: 'https://news.google.com/rss/search?q=(RIGI+OR+"Super+RIGI"+OR+"Vaca+Muerta"+inversiones)+("Rio+Negro"+OR+Neuquen)&hl=es-419&gl=AR&ceid=AR:es-419'
+  },
+  {
+    tag: 'Reconfiguración Laboral',
+    rss: 'https://news.google.com/rss/search?q=("reforma+laboral"+OR+precarizacion+OR+despidos+OR+gremios+OR+sindicatos+OR+trabajadores)+("Rio+Negro"+OR+Neuquen)&hl=es-419&gl=AR&ceid=AR:es-419'
+  },
+  {
+    tag: 'Desigualdad Socio-territorial',
+    rss: 'https://news.google.com/rss/search?q=(pobreza+OR+desigualdad+OR+alquileres+OR+vivienda+OR+"barrios+populares"+OR+tomas)+("Rio+Negro"+OR+Neuquen)&hl=es-419&gl=AR&ceid=AR:es-419'
+  }
 ];
 
 const FadecsWorkspace = () => {
@@ -36,14 +60,13 @@ const FadecsWorkspace = () => {
   const [messages, setMessages] = useState([]);
   const [newMessage, setNewMessage] = useState('');
   
-  // Estados para edición de mensajes
   const [editingMsgId, setEditingMsgId] = useState(null);
   const [editingText, setEditingText] = useState('');
 
-  // Estados para diseño adaptable (móvil) y noticias en vivo
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
-  const [mobileRoomTab, setMobileRoomTab] = useState('chat'); // 'doc' o 'chat'
+  const [mobileRoomTab, setMobileRoomTab] = useState('chat');
   const [newsList, setNewsList] = useState(fallbackNews);
+  const [selectedCategory, setSelectedCategory] = useState('Todas');
   const [loadingNews, setLoadingNews] = useState(false);
 
   const chatEndRef = useRef(null);
@@ -77,26 +100,42 @@ const FadecsWorkspace = () => {
     await setDoc(doc(db, 'config', 'general'), { roomsCount: newCount }, { merge: true });
   };
 
-  // 4. Actualización automática de noticias regionales vía RSS
+  // 4. Búsqueda automática filtrada por los 5 ejes temáticos
   const fetchLiveNews = async () => {
     setLoadingNews(true);
     try {
-      const res = await fetch('https://api.rss2json.com/v1/api.json?rss_url=https://www.rionegro.com.ar/feed/');
-      const data = await res.json();
-      if (data.items && data.items.length > 0) {
-        const liveItems = data.items.slice(0, 6).map((item, idx) => ({
-          id: `live-${idx}`,
-          tag: 'Actualidad Regional',
-          title: item.title,
-          date: new Date(item.pubDate).toLocaleDateString('es-AR', { day: 'numeric', month: 'short' }),
-          source: 'Diario Río Negro',
-          url: item.link,
-          snippet: item.description ? item.description.replace(/<[^>]+>/g, '').slice(0, 140) + '...' : 'Click para leer la nota completa en el portal.'
-        }));
-        setNewsList([...liveItems, ...fallbackNews]);
+      const promises = thematicFeeds.map(async (feed) => {
+        const apiUrl = `https://api.rss2json.com/v1/api.json?rss_url=${encodeURIComponent(feed.rss)}`;
+        const res = await fetch(apiUrl);
+        const data = await res.json();
+        if (data.items) {
+          return data.items.slice(0, 3).map((item, idx) => {
+            const titleParts = item.title.split(' - ');
+            const cleanTitle = titleParts.length > 1 ? titleParts.slice(0, -1).join(' - ') : item.title;
+            const sourceName = titleParts.length > 1 ? titleParts[titleParts.length - 1] : (item.author || 'Medio Regional');
+
+            return {
+              id: `${feed.tag}-${idx}-${Date.now()}`,
+              tag: feed.tag,
+              title: cleanTitle,
+              date: new Date(item.pubDate).toLocaleDateString('es-AR', { day: 'numeric', month: 'short', year: 'numeric' }),
+              source: sourceName,
+              url: item.link,
+              snippet: `Nota periodística vinculada al eje de ${feed.tag} en la región patagónica.`
+            };
+          });
+        }
+        return [];
+      });
+
+      const results = await Promise.all(promises);
+      const combinedLive = results.flat();
+
+      if (combinedLive.length > 0) {
+        setNewsList([...combinedLive, ...fallbackNews]);
       }
     } catch (err) {
-      console.error('Usando noticias de respaldo:', err);
+      console.error('Error al actualizar feeds temáticos, usando respaldo:', err);
     }
     setLoadingNews(false);
   };
@@ -179,6 +218,9 @@ const FadecsWorkspace = () => {
     setEditingMsgId(null);
   };
 
+  const categories = ['Todas', 'Ambiente y Extractivismo', 'Comunidades Originarias', 'Políticas de Inversión (RIGI)', 'Reconfiguración Laboral', 'Desigualdad Socio-territorial'];
+  const filteredNews = selectedCategory === 'Todas' ? newsList : newsList.filter(n => n.tag === selectedCategory);
+
   // PANTALLA DE LOGIN
   if (!user) {
     return (
@@ -194,11 +236,11 @@ const FadecsWorkspace = () => {
     );
   }
 
-  // INTERFAZ PRINCIPAL ADAPTABLE (PC Y MÓVIL)
+  // INTERFAZ PRINCIPAL ADAPTABLE
   return (
     <div className="flex flex-col md:flex-row h-screen bg-orange-50 font-sans text-orange-900 overflow-hidden">
       
-      {/* CABECERA MÓVIL (Solo visible en celulares) */}
+      {/* CABECERA MÓVIL */}
       <div className="md:hidden flex items-center justify-between p-3 bg-orange-200 border-b border-orange-300 shadow-sm z-20">
         <div>
           <h1 className="text-lg font-bold text-orange-900 leading-tight">JIFADECS 2026</h1>
@@ -212,7 +254,7 @@ const FadecsWorkspace = () => {
         </button>
       </div>
 
-      {/* BARRA LATERAL (Fija en PC, desplegable en Celular) */}
+      {/* BARRA LATERAL */}
       <div className={`${isMobileMenuOpen ? 'fixed inset-0 top-[57px] z-30 flex' : 'hidden'} md:relative md:top-0 md:flex w-full md:w-64 bg-orange-100 border-r border-orange-200 flex-col shadow-sm`}>
         <div className="hidden md:block p-4 border-b border-orange-200 bg-orange-200/50">
           <h1 className="text-xl font-bold text-orange-800">JIFADECS 2026</h1>
@@ -224,7 +266,7 @@ const FadecsWorkspace = () => {
           <div>
             <h2 className="text-xs font-semibold text-orange-500 uppercase tracking-wider mb-2">General</h2>
             <button onClick={() => selectView('chat-general')} className={`w-full text-left px-3 py-2.5 rounded-md transition-colors text-sm font-medium ${currentView === 'chat-general' ? 'bg-orange-500 text-white shadow' : 'hover:bg-orange-200 text-orange-800'}`}>💬 Chat General</button>
-            <button onClick={() => selectView('noticias')} className={`w-full text-left px-3 py-2.5 rounded-md transition-colors mt-1 text-sm font-medium ${currentView === 'noticias' ? 'bg-orange-500 text-white shadow' : 'hover:bg-orange-200 text-orange-800'}`}>📰 Noticias y Diarios</button>
+            <button onClick={() => selectView('noticias')} className={`w-full text-left px-3 py-2.5 rounded-md transition-colors mt-1 text-sm font-medium ${currentView === 'noticias' ? 'bg-orange-500 text-white shadow' : 'hover:bg-orange-200 text-orange-800'}`}>📰 Ejes y Noticias</button>
           </div>
 
           <div>
@@ -256,14 +298,14 @@ const FadecsWorkspace = () => {
       <div className="flex-1 flex flex-col overflow-hidden h-full">
         {currentView === 'noticias' ? (
           <div className="flex-1 overflow-y-auto p-4 md:p-8 bg-orange-50/50">
-            <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-6">
+            <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-4">
               <div>
-                <h2 className="text-2xl md:text-3xl font-bold text-orange-800">Noticias y Diarios del Día</h2>
-                <p className="text-xs md:text-sm text-orange-600 mt-1">Actualización automática de medios regionales y acceso al quiosco de diarios.</p>
+                <h2 className="text-2xl md:text-3xl font-bold text-orange-800">Actualidad Regional por Ejes Temáticos</h2>
+                <p className="text-xs md:text-sm text-orange-600 mt-1">Monitoreo de medios patagónicos sobre extractivismo, territorio, pueblos originarios, RIGI y trabajo.</p>
               </div>
               <div className="flex flex-wrap gap-2">
                 <button onClick={fetchLiveNews} className="px-3 py-2 bg-orange-200 text-orange-900 rounded-lg font-semibold text-xs md:text-sm hover:bg-orange-300 transition-colors">
-                  {loadingNews ? '🔄 Actualizando...' : '🔄 Actualizar titulares'}
+                  {loadingNews ? '🔄 Buscando notas...' : '🔄 Actualizar titulares'}
                 </button>
                 <a 
                   href="https://www.diariosargentinos.com.ar/web" 
@@ -271,23 +313,36 @@ const FadecsWorkspace = () => {
                   rel="noreferrer" 
                   className="px-4 py-2 bg-orange-500 text-white rounded-lg font-bold text-xs md:text-sm hover:bg-orange-600 shadow transition-colors flex items-center gap-1"
                 >
-                  🗞️ Abrir Diarios Argentinos ↗
+                  🗞️ Kiosco Diarios Argentinos ↗
                 </a>
               </div>
             </div>
 
+            {/* FILTROS POR EJE TEMÁTICO */}
+            <div className="flex flex-wrap gap-2 mb-6 pb-2 border-b border-orange-200">
+              {categories.map(cat => (
+                <button
+                  key={cat}
+                  onClick={() => setSelectedCategory(cat)}
+                  className={`px-3 py-1.5 rounded-full text-xs font-bold transition-colors ${selectedCategory === cat ? 'bg-orange-600 text-white shadow-sm' : 'bg-orange-100 text-orange-800 hover:bg-orange-200'}`}
+                >
+                  {cat}
+                </button>
+              ))}
+            </div>
+
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4 md:gap-6">
-              {newsList.map(news => (
+              {filteredNews.map(news => (
                 <div key={news.id} className="bg-white p-4 md:p-6 rounded-lg shadow-sm border border-orange-100 hover:shadow-md transition-shadow flex flex-col justify-between">
                   <div>
-                    <div className="flex items-center justify-between mb-2">
-                      <span className="inline-block px-2 py-0.5 bg-orange-100 text-orange-700 text-xs font-semibold rounded-full">{news.tag}</span>
-                      <span className="text-xs text-orange-400">{news.date} • {news.source}</span>
+                    <div className="flex items-center justify-between gap-2 mb-2">
+                      <span className="inline-block px-2.5 py-0.5 bg-orange-100 text-orange-800 text-[11px] font-bold rounded-full">{news.tag}</span>
+                      <span className="text-[11px] text-orange-500 font-medium text-right">{news.date} • {news.source}</span>
                     </div>
-                    <h3 className="text-base md:text-lg font-bold text-orange-900 mb-2">{news.title}</h3>
+                    <h3 className="text-base md:text-lg font-bold text-orange-900 mb-2 leading-snug">{news.title}</h3>
                     <p className="text-orange-700 text-xs md:text-sm mb-4 line-clamp-3">{news.snippet}</p>
                   </div>
-                  <a href={news.url} target="_blank" rel="noreferrer" className="text-orange-500 font-semibold text-xs md:text-sm hover:text-orange-700 self-start">Leer artículo completo →</a>
+                  <a href={news.url} target="_blank" rel="noreferrer" className="text-orange-600 font-bold text-xs md:text-sm hover:text-orange-800 self-start">Leer artículo completo →</a>
                 </div>
               ))}
             </div>
@@ -295,7 +350,7 @@ const FadecsWorkspace = () => {
         ) : (
           <div className="flex-1 flex flex-col md:flex-row h-full overflow-hidden">
             
-            {/* SELECTOR DE PESTAÑAS EN MÓVIL (Solo aparece en salas de Monografía en celulares) */}
+            {/* SELECTOR DE PESTAÑAS EN MÓVIL */}
             {currentView.startsWith('sala-') && (
               <div className="md:hidden flex border-b border-orange-200 bg-orange-100">
                 <button 
@@ -313,7 +368,7 @@ const FadecsWorkspace = () => {
               </div>
             )}
 
-            {/* ZONA DE DOCUMENTO (Oculta en móvil si se está viendo el chat) */}
+            {/* ZONA DE DOCUMENTO */}
             {currentView.startsWith('sala-') && (
               <div className={`${mobileRoomTab === 'doc' ? 'flex' : 'hidden'} md:flex flex-1 flex-col border-r border-orange-200 bg-white h-full overflow-hidden`}>
                 <div className="p-3 md:p-4 bg-orange-100/30 border-b border-orange-200">
@@ -337,7 +392,7 @@ const FadecsWorkspace = () => {
               </div>
             )}
 
-            {/* ZONA DE CHAT (Para General y Monografías) */}
+            {/* ZONA DE CHAT */}
             <div className={`${currentView.startsWith('sala-') && mobileRoomTab === 'doc' ? 'hidden md:flex' : 'flex'} ${currentView === 'chat-general' ? 'w-full max-w-4xl mx-auto md:my-6 md:rounded-xl md:shadow-lg md:border' : 'w-full md:w-96'} flex-1 md:flex-initial bg-white flex-col border-orange-200 h-full overflow-hidden`}>
               <div className="p-3 md:p-4 border-b border-orange-200 bg-orange-100/50 flex justify-between items-center">
                 <h3 className="font-bold text-orange-800 text-sm md:text-base capitalize">
@@ -356,7 +411,6 @@ const FadecsWorkspace = () => {
                           {msg.sender} {msg.edited && <span className="italic font-normal opacity-80">(editado)</span>}
                         </span>
                         
-                        {/* Botones de Editar y Borrar */}
                         {(isMine || isAdmin) && editingMsgId !== msg.id && (
                           <div className="flex items-center gap-1.5 opacity-80 hover:opacity-100">
                             {isMine && (
@@ -371,7 +425,6 @@ const FadecsWorkspace = () => {
                         )}
                       </div>
 
-                      {/* Modo Edición vs Modo Lectura */}
                       {editingMsgId === msg.id ? (
                         <div className="mt-1 flex flex-col gap-1.5">
                           <input 
