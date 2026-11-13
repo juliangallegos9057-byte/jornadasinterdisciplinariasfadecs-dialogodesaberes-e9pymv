@@ -607,4 +607,4 @@ const FadecsWorkspace = () => {
   );
 };
 
-export Date FadecsWorkspace; // (Nota: mantener export default FadecsWorkspace al final)
+export default FadecsWorkspace;
