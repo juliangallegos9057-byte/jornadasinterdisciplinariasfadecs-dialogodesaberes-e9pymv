@@ -91,6 +91,41 @@ const getDirectArticleUrl = (urlString) => {
   }
 };
 
+// Ciudades, poblados y referencias territoriales de Río Negro y Neuquén (normalizados sin tildes)
+const rnNqTerritoryTerms = [
+  'rio negro', 'neuquen', 'alto valle', 'valle medio', 'linea sur', 'comahue',
+  'norpatagonia', 'golfo san matias', 'vaca muerta', 'fiske menuco', 'limay', 'colorado',
+  'general roca', 'cipolletti', 'bariloche', 'san carlos de bariloche', 'viedma',
+  'allen', 'villa regina', 'cinco saltos', 'catriel', 'rio colorado', 'choele choel',
+  'chimpay', 'belisle', 'luis beltran', 'darwin', 'coronel gomez', 'cervantes',
+  'ingeniero jacobacci', 'jacobacci', 'maquinchao', 'los menucos', 'sierra grande',
+  'las grutas', 'san antonio oeste', 'san antonio este', 'el bolson', 'dina huapi',
+  'comallo', 'pilcaniyeu', 'valcheta', 'general conesa', 'conesa', 'guardia mitre',
+  'namuncura', 'campo grande', 'sargento vidal', 'barda del medio', 'contralmirante cordero',
+  'fernandez oro', 'cerro policia', 'aguada guzman', 'mencue', 'el cuy',
+  'sierra colorada', 'ramos mexia', 'clemente onelli',
+  'plottier', 'centenario', 'senillosa', 'vista alegre', 'cutral co', 'plaza huincul',
+  'zapala', 'san martin de los andes', 'villa la angostura', 'junin de los andes',
+  'chos malal', 'rincon de los sauces', 'anelo', 'villa pehuenia', 'moquehue',
+  'alumine', 'loncopue', 'las lajas', 'picun leufu', 'piedra del aguila', 'el chocon',
+  'villa el chocon', 'las ovejas', 'andacollo', 'huinganco', 'taquimilan', 'el huecu',
+  'bajada del agrario', 'mariano moreno', 'las coloradas', 'caviahue', 'copahue',
+  'buta ranquil', 'barrancas', 'sauzal bonito', 'villa trahun', 'villa llanquin',
+  'san patricio del chanar', 'el cholar', 'tricao malal'
+];
+
+// Otras provincias y ciudades fuera de Río Negro y Neuquén (normalizados sin tildes)
+const excludedOtherProvincesAndCities = [
+  'buenos aires', 'caba', 'capital federal', 'amba', 'conurbano', 'la plata',
+  'mar del plata', 'bahia blanca', 'cordoba', 'rosario', 'santa fe', 'mendoza',
+  'tucuman', 'salta', 'jujuy', 'chubut', 'rawson', 'trelew', 'puerto madryn',
+  'comodoro rivadavia', 'esquel', 'santa cruz', 'rio gallegos', 'el calafate',
+  'tierra del fuego', 'ushuaia', 'rio grande', 'la pampa', 'santa rosa',
+  'general pico', 'san luis', 'san juan', 'la rioja', 'catamarca',
+  'santiago del estero', 'chaco', 'resistencia', 'formosa', 'misiones',
+  'posadas', 'corrientes', 'entre rios', 'parana'
+];
+
 // Palabras prohibidas globales (sin tildes, comparadas sobre texto normalizado)
 const globalExclusions = [
   'accidente', 'choque', 'volco', 'vuelco', 'muerto', 'fallecio', 'fallecido', 'fatal',
@@ -101,12 +136,26 @@ const globalExclusions = [
   'ahogado', 'desaparecido', 'buscan a', 'ambulancia', 'heridos', 'hospitalizaron'
 ];
 
-// Validador metodológico estricto por intersección conceptual
+// Verifica que la noticia pertenezca a Río Negro o Neuquén y no a otras provincias/ciudades
+const isRnOrNqNews = (normText) => {
+  for (const otherPlace of excludedOtherProvincesAndCities) {
+    if (normText.includes(otherPlace)) {
+      return false;
+    }
+  }
+  return rnNqTerritoryTerms.some(term => normText.includes(term));
+};
+
+// Validador metodológico estricto por territorio (RN/NQ) e intersección conceptual
 const passesStrictFilter = (title, snippet, category) => {
   const normText = normalizeText(`${title} ${snippet}`);
 
   for (const badWord of globalExclusions) {
     if (normText.includes(badWord)) return false;
+  }
+
+  if (!isRnOrNqNews(normText)) {
+    return false;
   }
 
   if (category === 'Extractivismo y Minería') {
@@ -205,62 +254,62 @@ const regionalPortalsQuery = [
   'site:lmcipolleti.com.ar'
 ].join(' OR ');
 
-// Noticias base metodológicas curadas con enlaces directos a secciones/notas específicas
+// Noticias base metodológicas curadas de Río Negro y Neuquén con enlaces directos
 const fallbackNews = [
   {
     id: 'base-extract-1',
     tag: 'Extractivismo y Minería',
-    title: 'Temas de pueblos originarios y conflictos territoriales en el país y la región',
+    title: 'Pueblos originarios, territorio y conflictos por el agua en Río Negro y Neuquén',
     date: 'Nov 2026',
     source: 'elDiarioAR',
     url: 'https://www.eldiarioar.com/temas/pueblos-originarios/',
-    snippet: 'Problemáticas sociales que trae el extractivismo y la minería: proyectos aprobados en la zona, conflictos de comunidades por el acceso al agua frente a empresas explotadoras y el costo social oculto.'
+    snippet: 'Problemáticas sociales que trae el extractivismo y la minería en Río Negro y Neuquén: proyectos aprobados en la zona, disputas de comunidades por el acceso al agua frente a empresas explotadoras y el costo social oculto.'
   },
   {
     id: 'base-extract-2',
     tag: 'Extractivismo y Minería',
-    title: 'Invitación a la VII Cumbre del Agua Plurinacional para los pueblos de Abya Yala',
+    title: 'Cumbre del Agua Plurinacional y defensa de bienes comunes en la región de Neuquén y Río Negro',
     date: 'Nov 2026',
     source: 'Movimiento Alternativa',
     url: 'https://www.movimientoalternativa.com.ar/l/entrevista/invitacion-a-la-vii-cumbre-del-agua-plurinacional-para-los-pueblos-de-abya-yala-21-22-y-23-de-nov-luyaba-cordoba/',
-    snippet: 'Debate sobre el impacto ambiental de las actividades económicas de la zona y las tensiones territoriales frente a nuevos emprendimientos.'
+    snippet: 'Debate socioambiental sobre el impacto de las inversiones y proyectos extractivos en el acceso al agua de las comunidades de Río Negro y Neuquén.'
   },
   {
     id: 'base-unco-1',
     tag: 'UNCo (Fiske Menuco / Neuquén)',
-    title: 'Ruta 40, universidad y radares: articulación académica y territorial',
+    title: 'Universidad, territorio y articulación académica en Fiske Menuco (General Roca) y Neuquén',
     date: 'Ago 2026',
     source: 'Vivo Informado',
     url: 'https://www.vivoinformado.com.ar/2026/08/ruta-40-universidad-y-radares-javier.html',
-    snippet: 'Espacio de articulación entre teoría y práctica, participación horizontal y vinculación de la universidad pública con el territorio en Fiske Menuco y Neuquén.'
+    snippet: 'Producción y debate interdisciplinario en la Universidad Nacional del Comahue entre Fiske Menuco, el Alto Valle y Neuquén.'
   }
 ];
 
-// Consultas RSS optimizadas con los portales de Neuquén y Río Negro (sin paréntesis ni corchetes)
+// Consultas RSS optimizadas con Río Negro, Neuquén y sus portales (sin paréntesis ni corchetes)
 const thematicFeeds = [
   {
     tag: 'Extractivismo y Minería',
-    rss: `https://news.google.com/rss/search?q=extractivismo OR mineria OR fracking OR agua OR ambiental OR comunidades ${regionalPortalsQuery} -accidente -choque -policial&hl=es-419&gl=AR&ceid=AR:es-419`
+    rss: `https://news.google.com/rss/search?q=extractivismo OR mineria OR fracking OR agua OR ambiental OR comunidades "rio negro" OR neuquen OR "fiske menuco" OR "general roca" OR cipolletti OR catriel OR anelo ${regionalPortalsQuery} -accidente -choque -policial&hl=es-419&gl=AR&ceid=AR:es-419`
   },
   {
     tag: 'Desigualdades Socio-Territoriales',
-    rss: `https://news.google.com/rss/search?q=desigualdad OR pobreza OR vivienda OR alquileres OR barrios OR territorial ${regionalPortalsQuery} -accidente -choque -policial&hl=es-419&gl=AR&ceid=AR:es-419`
+    rss: `https://news.google.com/rss/search?q=desigualdad OR pobreza OR vivienda OR alquileres OR barrios OR territorial "rio negro" OR neuquen OR "fiske menuco" OR "general roca" OR bariloche OR viedma OR zapala ${regionalPortalsQuery} -accidente -choque -policial&hl=es-419&gl=AR&ceid=AR:es-419`
   },
   {
     tag: 'Configuraciones y Reformas Laborales',
-    rss: `https://news.google.com/rss/search?q="reforma laboral" OR precarizacion OR despidos OR paritarias OR sindicatos ${regionalPortalsQuery} -accidente -choque -policial&hl=es-419&gl=AR&ceid=AR:es-419`
+    rss: `https://news.google.com/rss/search?q="reforma laboral" OR precarizacion OR despidos OR paritarias OR sindicatos "rio negro" OR neuquen OR "fiske menuco" OR "general roca" OR cipolletti OR "cutral co" ${regionalPortalsQuery} -accidente -choque -policial&hl=es-419&gl=AR&ceid=AR:es-419`
   },
   {
     tag: 'Políticas de Inversión (RIGI / Súper RIGI)',
-    rss: `https://news.google.com/rss/search?q=RIGI OR "Super RIGI" OR inversiones OR "Vaca Muerta" ${regionalPortalsQuery} -accidente -futbol&hl=es-419&gl=AR&ceid=AR:es-419`
+    rss: `https://news.google.com/rss/search?q=RIGI OR "Super RIGI" OR inversiones OR "Vaca Muerta" "rio negro" OR neuquen OR anelo OR "rincon de los sauces" OR "san antonio oeste" ${regionalPortalsQuery} -accidente -futbol&hl=es-419&gl=AR&ceid=AR:es-419`
   },
   {
     tag: 'Perspectiva de Género',
-    rss: `https://news.google.com/rss/search?q="perspectiva de genero" OR "violencia de genero" OR feminismo OR disidencias OR cuidado ${regionalPortalsQuery} -accidente -choque -vial -papa&hl=es-419&gl=AR&ceid=AR:es-419`
+    rss: `https://news.google.com/rss/search?q="perspectiva de genero" OR "violencia de genero" OR feminismo OR disidencias OR cuidado "rio negro" OR neuquen OR "fiske menuco" OR "general roca" OR bariloche ${regionalPortalsQuery} -accidente -choque -vial -papa&hl=es-419&gl=AR&ceid=AR:es-419`
   },
   {
     tag: 'UNCo (Fiske Menuco / Neuquén)',
-    rss: `https://news.google.com/rss/search?q="Universidad Nacional del Comahue" OR UNCo OR FADECS OR "Fiske Menuco" ${regionalPortalsQuery} -accidente -choque -futbol&hl=es-419&gl=AR&ceid=AR:es-419`
+    rss: `https://news.google.com/rss/search?q="Universidad Nacional del Comahue" OR UNCo OR FADECS OR "Fiske Menuco" OR "General Roca" OR Neuquen ${regionalPortalsQuery} -accidente -choque -futbol&hl=es-419&gl=AR&ceid=AR:es-419`
   }
 ];
 
@@ -357,7 +406,7 @@ const FadecsWorkspace = () => {
           const cleanTitle = titleParts.length > 1 ? titleParts.slice(0, -1).join(' - ').trim() : rawTitle;
           const sourceName = titleParts.length > 1 ? titleParts[titleParts.length - 1].trim() : (item.author || 'Medio Regional');
           const cleanDesc = stripHtml(item.description || '');
-          const snippetText = cleanDesc.length > 25 ? cleanDesc.slice(0, 160) + '...' : `Artículo periodístico vinculado al eje ${feed.tag} en la región.`;
+          const snippetText = cleanDesc.length > 25 ? cleanDesc.slice(0, 160) + '...' : `Artículo periodístico vinculado al eje ${feed.tag} en Río Negro y Neuquén.`;
 
           if (!passesStrictFilter(cleanTitle, snippetText, feed.tag)) continue;
 
@@ -612,7 +661,7 @@ const FadecsWorkspace = () => {
             <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-4">
               <div>
                 <h2 className="text-2xl md:text-3xl font-bold text-orange-800">Actualidad Regional y Ejes Metodológicos</h2>
-                <p className="text-xs md:text-sm text-orange-600 mt-1">Análisis territorial crítico, extractivismo, agua, desigualdades, trabajo, género y UNCo (Fiske Menuco / Neuquén).</p>
+                <p className="text-xs md:text-sm text-orange-600 mt-1">Río Negro y Neuquén (ciudades y poblados): extractivismo, agua, desigualdades, trabajo, género y UNCo.</p>
               </div>
               <div className="flex flex-wrap gap-2">
                 <button
