@@ -52,30 +52,30 @@ const fallbackNews = [
   { id: 'base-1', tag: 'Ambiente y Extractivismo', title: 'Audiencia contra los proyectos extractivistas y en defensa del Golfo San Matías', date: '12 Nov 2026', source: 'Agencia Farco', url: 'https://agencia.farco.org.ar/2026/11/12/rio-negro-hoy-una-audiencia-contra-los-proyectos-extractivistas-y-en-defensa-del-golfo-san-matias/', snippet: 'Comunidades y asambleas socioambientales exponen el impacto sobre el ecosistema marino y el uso del agua en la región.' },
   { id: 'base-2', tag: 'Políticas de Inversión (RIGI)', title: 'Neuquén y Río Negro capturan el 56% del RIGI con Vaca Muerta', date: '9 Nov 2026', source: 'VacaMuerta.ar', url: 'https://vacamuerta.ar/neuquen-y-rio-negro-capturan-el-56-del-rigi-con-vaca-muerta/', snippet: 'Análisis del impacto fiscal y territorial de los proyectos aprobados bajo el régimen de incentivos a las grandes inversiones y el Súper RIGI.' },
   { id: 'base-3', tag: 'Reconfiguración Laboral', title: 'Juicios laborales en Río Negro: aumentaron las causas tras la reforma', date: '19 Oct 2026', source: 'Diario Río Negro', url: 'https://www.rionegro.com.ar/politica/juicios-laborales-en-rio-negro-aumentaron-las-causas-y-hubo-un-salto-en-los-acuerdos-de-conciliacion/', snippet: 'El impacto de la reforma laboral nacional en los tribunales provinciales y las nuevas dinámicas de contratación y despidos.' },
-  { id: 'base-4', tag: 'Desigualdad Socio-territorial', title: 'Índice de pobreza: brechas entre polos extractivos y barrios populares en la Patagonia', date: '24 Sep 2026', source: 'Diario Río Negro', url: 'https://www.rionegro.com.ar/economia/indice-de-pobreza-e-indigencia-que-paso-en-neuquen-rio-negro-y-la-patagonia-en-el-primer-semestre-del-2026-4735560/', snippet: 'Los indicadores reflejan el contraste entre el crecimiento de la renta hidrocarburífera y la crisis habitacional y de servicios en el territorio.' }
+  { id: 'base-4', tag: 'Comunidades Originarias', title: 'Relevamiento territorial y conflictos de tierras en el ámbito de comunidades mapuches', date: '24 Sep 2026', source: 'elDiarioAR', url: 'https://www.eldiarioar.com/temas/pueblos-originarios/', snippet: 'Seguimiento periodístico sobre las tensiones en torno a la propiedad comunitaria y las autonomías territoriales en la Patagonia.' }
 ];
 
-// Consultas RSS específicas para los 5 ejes en Río Negro y Neuquén
+// Consultas RSS afinadas con los portales regionales seleccionados (Río Negro y Neuquén)
 const thematicFeeds = [
   {
     tag: 'Ambiente y Extractivismo',
-    rss: 'https://news.google.com/rss/search?q=(extractivismo+OR+ambiental+OR+contaminacion+OR+fracking+OR+"Golfo+San+Matias"+OR+agua)+("Rio+Negro"+OR+Neuquen)&hl=es-419&gl=AR&ceid=AR:es-419'
+    rss: 'https://news.google.com/rss/search?q=(extractivismo+OR+ambiental+OR+contaminacion+OR+fracking+OR+"Golfo+San+Matias"+OR+agua)+site:(rionegro.com.ar+OR+anroca.com.ar+OR+mejorinformado.com+OR+elcordillerano.com.ar+OR+adnrionegro.com.ar)&hl=es-419&gl=AR&ceid=AR:es-419'
   },
   {
     tag: 'Comunidades Originarias',
-    rss: 'https://news.google.com/rss/search?q=(mapuche+OR+"comunidades+originarias"+OR+"pueblos+originarios"+OR+territorio+OR+Lof)+("Rio+Negro"+OR+Neuquen)&hl=es-419&gl=AR&ceid=AR:es-419'
+    rss: 'https://news.google.com/rss/search?q=(mapuche+OR+"comunidades+originarias"+OR+"pueblos+originarios"+OR+territorio+OR+Lof)+site:(eldiarioar.com+OR+rionegro.com.ar+OR+anroca.com.ar+OR+adnrionegro.com.ar)&hl=es-419&gl=AR&ceid=AR:es-419'
   },
   {
     tag: 'Políticas de Inversión (RIGI)',
-    rss: 'https://news.google.com/rss/search?q=(RIGI+OR+"Super+RIGI"+OR+"Vaca+Muerta"+inversiones)+("Rio+Negro"+OR+Neuquen)&hl=es-419&gl=AR&ceid=AR:es-419'
+    rss: 'https://news.google.com/rss/search?q=(RIGI+OR+"Super+RIGI"+OR+"Vaca+Muerta"+inversiones)+site:(rionegro.com.ar+OR+mejorinformado.com+OR+lmcipolletti.com.ar+OR+adnrionegro.com.ar)&hl=es-419&gl=AR&ceid=AR:es-419'
   },
   {
     tag: 'Reconfiguración Laboral',
-    rss: 'https://news.google.com/rss/search?q=("reforma+laboral"+OR+precarizacion+OR+despidos+OR+gremios+OR+sindicatos+OR+trabajadores)+("Rio+Negro"+OR+Neuquen)&hl=es-419&gl=AR&ceid=AR:es-419'
+    rss: 'https://news.google.com/rss/search?q=("reforma+laboral"+OR+precarizacion+OR+despidos+OR+gremios+OR+sindicatos+OR+trabajadores)+site:(rionegro.com.ar+OR+anroca.com.ar+OR+elperiodicoderincon.com.ar+OR+mejorinformado.com)&hl=es-419&gl=AR&ceid=AR:es-419'
   },
   {
     tag: 'Desigualdad Socio-territorial',
-    rss: 'https://news.google.com/rss/search?q=(pobreza+OR+desigualdad+OR+alquileres+OR+vivienda+OR+"barrios+populares"+OR+tomas)+("Rio+Negro"+OR+Neuquen)&hl=es-419&gl=AR&ceid=AR:es-419'
+    rss: 'https://news.google.com/rss/search?q=(pobreza+OR+desigualdad+OR+alquileres+OR+vivienda+OR+"barrios+populares"+OR+tomas)+site:(rionegro.com.ar+OR+anroca.com.ar+OR+elcordillerano.com.ar+OR+mejorinformado.com)&hl=es-419&gl=AR&ceid=AR:es-419'
   }
 ];
 
@@ -119,7 +119,7 @@ const FadecsWorkspace = () => {
     const unsub = onSnapshot(doc(db, 'config', 'general'), (docSnap) => {
       if (docSnap.exists()) {
         const count = Number(docSnap.data().roomsCount) || 1;
-        setRoomsCount(Math.min(Math.max(1, count), 30)); // Tope de seguridad de 30 salas
+        setRoomsCount(Math.min(Math.max(1, count), 30));
       }
     });
     return () => unsub();
@@ -132,7 +132,7 @@ const FadecsWorkspace = () => {
     await setDoc(doc(db, 'config', 'general'), { roomsCount: boundedCount }, { merge: true });
   };
 
-  // 4. Búsqueda automática filtrada por los 5 ejes temáticos
+  // 4. Búsqueda automática filtrada por los 5 ejes temáticos en los diarios seleccionados
   const fetchLiveNews = async () => {
     setLoadingNews(true);
     try {
@@ -204,7 +204,7 @@ const FadecsWorkspace = () => {
     return () => { unsubChat(); unsubDoc(); };
   }, [currentView, user]);
 
-  // 6. Enviar, Editar y Borrar Mensajes con validaciones de seguridad
+  // 6. Enviar, Editar y Borrar Mensajes
   const sendMessage = async (e) => {
     e.preventDefault();
     const trimmed = newMessage.trim();
@@ -371,7 +371,7 @@ const FadecsWorkspace = () => {
                 <a 
                   href="https://www.diariosargentinos.com.ar/web" 
                   target="_blank" 
-                  rel="noopener noreferrer" 
+                  rel="noreferrer" 
                   className="px-4 py-2 bg-orange-500 text-white rounded-lg font-bold text-xs md:text-sm hover:bg-orange-600 shadow transition-colors flex items-center gap-1"
                 >
                   🗞️ Kiosco Diarios Argentinos ↗
