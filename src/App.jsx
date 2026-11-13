@@ -71,19 +71,23 @@ const isValidGoogleUrl = (urlString) => {
   }
 };
 
-// Sanitizador de enlaces externos de noticias (conserva el enlace directo de la nota)
-const sanitizeHttpUrl = (urlString) => {
-  if (!urlString || typeof urlString !== 'string') return '#';
+// Validador estricto de enlace de artículo: exige URL http/https válida y ruta de nota (no portada raíz)
+const getDirectArticleUrl = (urlString) => {
+  if (!urlString || typeof urlString !== 'string') return '';
   const trimmed = urlString.trim();
-  if (trimmed === '#' || trimmed === '') return '#';
+  if (!trimmed || trimmed === '#') return '';
   try {
     const parsed = new URL(trimmed);
     if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
-      return '#';
+      return '';
+    }
+    const cleanPath = parsed.pathname.replace(/\/+$/, '');
+    if (!cleanPath || cleanPath === '') {
+      return '';
     }
     return trimmed;
   } catch {
-    return '#';
+    return '';
   }
 };
 
@@ -201,70 +205,34 @@ const regionalPortalsQuery = [
   'site:lmcipolleti.com.ar'
 ].join(' OR ');
 
-// Noticias base metodológicas curadas
+// Noticias base metodológicas curadas con enlaces directos a secciones/notas específicas
 const fallbackNews = [
   {
     id: 'base-extract-1',
     tag: 'Extractivismo y Minería',
-    title: 'Proyectos extractivos aprobados, disputa por el acceso al agua y la otra cara de las inversiones en la Norpatagonia',
+    title: 'Temas de pueblos originarios y conflictos territoriales en el país y la región',
     date: 'Nov 2026',
-    source: 'elDiarioAR / Red Regional',
+    source: 'elDiarioAR',
     url: 'https://www.eldiarioar.com/temas/pueblos-originarios/',
     snippet: 'Problemáticas sociales que trae el extractivismo y la minería: proyectos aprobados en la zona, conflictos de comunidades por el acceso al agua frente a empresas explotadoras y el costo social oculto.'
   },
   {
     id: 'base-extract-2',
     tag: 'Extractivismo y Minería',
-    title: 'Audiencias públicas y defensa de los bienes comunes en Río Negro y Neuquén',
+    title: 'Invitación a la VII Cumbre del Agua Plurinacional para los pueblos de Abya Yala',
     date: 'Nov 2026',
-    source: 'Diario Río Negro',
-    url: 'https://www.rionegro.com.ar/',
+    source: 'Movimiento Alternativa',
+    url: 'https://www.movimientoalternativa.com.ar/l/entrevista/invitacion-a-la-vii-cumbre-del-agua-plurinacional-para-los-pueblos-de-abya-yala-21-22-y-23-de-nov-luyaba-cordoba/',
     snippet: 'Debate sobre el impacto ambiental de las actividades económicas de la zona y las tensiones territoriales frente a nuevos emprendimientos.'
-  },
-  {
-    id: 'base-desig-1',
-    tag: 'Desigualdades Socio-Territoriales',
-    title: 'Brecha socio-territorial y acceso al trabajo frente a las promesas de inversión regional',
-    date: 'Nov 2026',
-    source: 'ANRoca',
-    url: 'https://www.anroca.com.ar/',
-    snippet: 'Diferencia entre el acceso real al empleo y al hábitat para las familias trabajadoras frente al discurso de derrame de las grandes inversiones.'
-  },
-  {
-    id: 'base-laboral-1',
-    tag: 'Configuraciones y Reformas Laborales',
-    title: 'Reformas laborales y seguridad en el empleo: condiciones para la reproducción de la vida',
-    date: 'Nov 2026',
-    source: 'Diario Río Negro',
-    url: 'https://www.rionegro.com.ar/',
-    snippet: 'Cómo impactan las nuevas configuraciones laborales en los trabajadores de la zona, su estabilidad y la posibilidad de sostener su reproducción social.'
-  },
-  {
-    id: 'base-rigi-1',
-    tag: 'Políticas de Inversión (RIGI / Súper RIGI)',
-    title: 'RIGI y Súper RIGI: tensiones por los incentivos a las inversiones y la desigualdad laboral',
-    date: 'Nov 2026',
-    source: 'Mejor Informado',
-    url: 'https://mejorinformado.com/',
-    snippet: 'Sub-eje sobre las políticas de incentivo a las inversiones y el abismo de desigualdad que generan en el acceso al trabajo local.'
-  },
-  {
-    id: 'base-genero-1',
-    tag: 'Perspectiva de Género',
-    title: 'Perspectiva de género, cuidados y organización comunitaria en la región',
-    date: 'Nov 2026',
-    source: 'elDiarioAR',
-    url: 'https://www.eldiarioar.com/temas/pueblos-originarios/',
-    snippet: 'Abordaje crítico de las desigualdades de género, tareas de cuidado y luchas colectivas en el territorio.'
   },
   {
     id: 'base-unco-1',
     tag: 'UNCo (Fiske Menuco / Neuquén)',
-    title: 'Novedades y producción académica en la UNCo (Fiske Menuco / General Roca y Neuquén)',
-    date: 'Nov 2026',
-    source: 'Neuquén Informa / UNCo',
-    url: 'https://neuqueninforma.gob.ar/',
-    snippet: 'Espacio de articulación entre teoría y práctica, participación horizontal y vinculación de la universidad pública con el territorio.'
+    title: 'Ruta 40, universidad y radares: articulación académica y territorial',
+    date: 'Ago 2026',
+    source: 'Vivo Informado',
+    url: 'https://www.vivoinformado.com.ar/2026/08/ruta-40-universidad-y-radares-javier.html',
+    snippet: 'Espacio de articulación entre teoría y práctica, participación horizontal y vinculación de la universidad pública con el territorio en Fiske Menuco y Neuquén.'
   }
 ];
 
@@ -361,7 +329,7 @@ const FadecsWorkspace = () => {
     }
   };
 
-  // 4. Búsqueda automática con separación título/medio y enlace directo de la nota
+  // 4. Búsqueda automática manteniendo vínculo estricto 1 a 1 entre título, medio y enlace de la nota
   const fetchLiveNews = async (forceRefresh = false) => {
     const now = Date.now();
     if (!forceRefresh && now - lastFetchTimeRef.current < NEWS_CACHE_TTL_MS) {
@@ -377,27 +345,35 @@ const FadecsWorkspace = () => {
         const data = await res.json();
         if (!data.items || !Array.isArray(data.items)) return [];
 
-        return data.items
-          .map((item) => {
-            const rawTitle = item.title || '';
-            const titleParts = rawTitle.split(' - ');
-            const cleanTitle = titleParts.length > 1 ? titleParts.slice(0, -1).join(' - ').trim() : rawTitle.trim();
-            const sourceName = titleParts.length > 1 ? titleParts[titleParts.length - 1].trim() : (item.author || 'Medio Regional');
-            const cleanDesc = stripHtml(item.description || '');
-            const directLink = sanitizeHttpUrl(item.link);
+        const parsedArticles = [];
+        for (const item of data.items) {
+          const directLink = getDirectArticleUrl(item.link);
+          if (!directLink) continue;
 
-            return {
-              id: createDeterministicHash(`${feed.tag}-${cleanTitle}`),
-              tag: feed.tag,
-              title: cleanTitle,
-              date: item.pubDate ? new Date(item.pubDate).toLocaleDateString('es-AR', { day: 'numeric', month: 'short', year: 'numeric' }) : 'Actualidad',
-              source: sourceName,
-              url: directLink,
-              snippet: cleanDesc.length > 25 ? cleanDesc.slice(0, 160) + '...' : `Artículo periodístico vinculado al eje ${feed.tag} en la región.`
-            };
-          })
-          .filter(article => article.url !== '#' && passesStrictFilter(article.title, article.snippet, feed.tag))
-          .slice(0, 3);
+          const rawTitle = typeof item.title === 'string' ? item.title.trim() : '';
+          if (!rawTitle) continue;
+
+          const titleParts = rawTitle.split(' - ');
+          const cleanTitle = titleParts.length > 1 ? titleParts.slice(0, -1).join(' - ').trim() : rawTitle;
+          const sourceName = titleParts.length > 1 ? titleParts[titleParts.length - 1].trim() : (item.author || 'Medio Regional');
+          const cleanDesc = stripHtml(item.description || '');
+          const snippetText = cleanDesc.length > 25 ? cleanDesc.slice(0, 160) + '...' : `Artículo periodístico vinculado al eje ${feed.tag} en la región.`;
+
+          if (!passesStrictFilter(cleanTitle, snippetText, feed.tag)) continue;
+
+          parsedArticles.push({
+            id: createDeterministicHash(`${feed.tag}-${cleanTitle}-${directLink}`),
+            tag: feed.tag,
+            title: cleanTitle,
+            date: item.pubDate ? new Date(item.pubDate).toLocaleDateString('es-AR', { day: 'numeric', month: 'short', year: 'numeric' }) : 'Actualidad',
+            source: sourceName,
+            url: directLink,
+            snippet: snippetText
+          });
+
+          if (parsedArticles.length >= 3) break;
+        }
+        return parsedArticles;
       });
 
       const results = await Promise.all(promises);
@@ -681,7 +657,7 @@ const FadecsWorkspace = () => {
                     <h3 className="text-base md:text-lg font-bold text-orange-900 mb-2 leading-snug">{news.title}</h3>
                     <p className="text-orange-700 text-xs md:text-sm mb-4 line-clamp-3">{news.snippet}</p>
                   </div>
-                  <a href={sanitizeHttpUrl(news.url)} target="_blank" rel="noopener noreferrer" className="text-orange-600 font-bold text-xs md:text-sm hover:text-orange-800 self-start">Leer artículo completo →</a>
+                  <a href={news.url} target="_blank" rel="noopener noreferrer" className="text-orange-600 font-bold text-xs md:text-sm hover:text-orange-800 self-start">Leer artículo completo →</a>
                 </div>
               ))}
             </div>
@@ -717,7 +693,7 @@ const FadecsWorkspace = () => {
                     </p>
                     {activeDocUrl && isValidGoogleUrl(activeDocUrl) && (
                       <a
-                        href={sanitizeHttpUrl(activeDocUrl)}
+                        href={activeDocUrl}
                         target="_blank"
                         rel="noopener noreferrer"
                         className="px-3 py-1 bg-orange-600 text-white rounded font-bold text-xs hover:bg-orange-700 shadow-sm whitespace-nowrap self-start sm:self-auto"
