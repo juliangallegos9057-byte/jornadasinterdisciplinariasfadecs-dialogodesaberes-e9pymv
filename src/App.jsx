@@ -54,7 +54,7 @@ const fallbackNews = [
   { id: 'base-3', tag: 'UNCo (Fiske Menuco / Neuquén)', title: 'Actividades académicas y de extensión en FADECS y sedes del Alto Valle y Neuquén', date: '05 Nov 2026', source: 'UNCo Informa', url: 'https://neuqueninforma.gob.ar/', snippet: 'Novedades sobre investigación, adscripciones y posicionamientos públicos de la Universidad Nacional del Comahue.' }
 ];
 
-// Consultas RSS afinadas
+// Consultas RSS con filtro de género blindado contra ruido (accidentes, papas, etc.)
 const thematicFeeds = [
   {
     tag: 'Ambiente y Extractivismo',
@@ -78,7 +78,7 @@ const thematicFeeds = [
   },
   {
     tag: 'Perspectiva de Género',
-    rss: 'https://news.google.com/rss/search?q=(genero+OR+feminismos+OR+disidencias+OR+violencia+de+genero+OR+cuidados)+site:(rionegro.com.ar+OR+anroca.com.ar+OR+eldiarioar.com+OR+adnrionegro.com.ar)&hl=es-419&gl=AR&ceid=AR:es-419'
+    rss: 'https://news.google.com/rss/search?q=("perspectiva+de+genero"+OR+"violencia+de+genero"+OR+feminismos+OR+disidencias+OR+"tareas+de+cuidado"+OR+colectivo+feminista)+("Rio+Negro"+OR+Neuquen)&hl=es-419&gl=AR&ceid=AR:es-419'
   },
   {
     tag: 'UNCo (Fiske Menuco / Neuquén)',
@@ -445,13 +445,13 @@ const FadecsWorkspace = () => {
               </div>
             )}
 
-            {/* ZONA DE DOCUMENTO (ACCESO DIRECTO + CONFIGURACIÓN) */}
+            {/* ZONA DE DOCUMENTO */}
             {currentView.startsWith('sala-') && (
               <div className={`${mobileRoomTab === 'doc' ? 'flex' : 'hidden'} md:flex flex-1 flex-col border-r border-orange-200 bg-white h-full overflow-hidden`}>
                 <div className="p-3 md:p-4 bg-orange-100/30 border-b border-orange-200">
                   <div className="bg-yellow-50 border-l-4 border-yellow-400 p-2 mb-2.5">
                     <p className="text-xs text-yellow-800">
-                      ⚠️ <strong>Aviso:</strong> Por políticas de seguridad de Google, los documentos se editan de forma óptima abriéndolos en una pestaña propia.
+                      ⚠️ <strong>Aviso:</strong> Por políticas de seguridad de Google, los documentos se editan abriéndolos en una pestaña propia.
                     </p>
                   </div>
                   <form onSubmit={handleDocSubmit} className="flex gap-2">
