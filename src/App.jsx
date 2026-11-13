@@ -47,15 +47,14 @@ const sanitizeHttpUrl = (urlString) => {
   }
 };
 
-// Noticias base curadas sobre los 5 ejes de las Jornadas
+// Noticias base curadas sobre los ejes de las Jornadas
 const fallbackNews = [
   { id: 'base-1', tag: 'Ambiente y Extractivismo', title: 'Audiencia contra los proyectos extractivistas y en defensa del Golfo San Matías', date: '12 Nov 2026', source: 'Agencia Farco', url: 'https://agencia.farco.org.ar/2026/11/12/rio-negro-hoy-una-audiencia-contra-los-proyectos-extractivistas-y-en-defensa-del-golfo-san-matias/', snippet: 'Comunidades y asambleas socioambientales exponen el impacto sobre el ecosistema marino y el uso del agua en la región.' },
-  { id: 'base-2', tag: 'Políticas de Inversión (RIGI)', title: 'Neuquén y Río Negro capturan el 56% del RIGI con Vaca Muerta', date: '9 Nov 2026', source: 'VacaMuerta.ar', url: 'https://vacamuerta.ar/neuquen-y-rio-negro-capturan-el-56-del-rigi-con-vaca-muerta/', snippet: 'Análisis del impacto fiscal y territorial de los proyectos aprobados bajo el régimen de incentivos a las grandes inversiones y el Súper RIGI.' },
-  { id: 'base-3', tag: 'Reconfiguración Laboral', title: 'Juicios laborales en Río Negro: aumentaron las causas tras la reforma', date: '19 Oct 2026', source: 'Diario Río Negro', url: 'https://www.rionegro.com.ar/politica/juicios-laborales-en-rio-negro-aumentaron-las-causas-y-hubo-un-salto-en-los-acuerdos-de-conciliacion/', snippet: 'El impacto de la reforma laboral nacional en los tribunales provinciales y las nuevas dinámicas de contratación y despidos.' },
-  { id: 'base-4', tag: 'Comunidades Originarias', title: 'Relevamiento territorial y conflictos de tierras en el ámbito de comunidades mapuches', date: '24 Sep 2026', source: 'elDiarioAR', url: 'https://www.eldiarioar.com/temas/pueblos-originarios/', snippet: 'Seguimiento periodístico sobre las tensiones en torno a la propiedad comunitaria y las autonomías territoriales en la Patagonia.' }
+  { id: 'base-2', tag: 'Perspectiva de Género', title: 'Agendas feministas y diversidades frente a las reconfiguraciones socioestatales en la Patagonia', date: '10 Nov 2026', source: 'Diario Río Negro', url: 'https://www.rionegro.com.ar/', snippet: 'Debates sobre la precarización de las tareas de cuidado y organización comunitaria de las mujeres y disidencias.' },
+  { id: 'base-3', tag: 'UNCo (Fiske Menuco / Neuquén)', title: 'Actividades académicas y de extensión en FADECS y sedes del Alto Valle y Neuquén', date: '05 Nov 2026', source: 'UNCo Informa', url: 'https://neuqueninforma.gob.ar/', snippet: 'Novedades sobre investigación, adscripciones y posicionamientos públicos de la Universidad Nacional del Comahue.' }
 ];
 
-// Consultas RSS afinadas con los portales regionales seleccionados (Río Negro y Neuquén)
+// Consultas RSS afinadas
 const thematicFeeds = [
   {
     tag: 'Ambiente y Extractivismo',
@@ -76,6 +75,14 @@ const thematicFeeds = [
   {
     tag: 'Desigualdad Socio-territorial',
     rss: 'https://news.google.com/rss/search?q=(pobreza+OR+desigualdad+OR+alquileres+OR+vivienda+OR+"barrios+populares"+OR+tomas)+site:(rionegro.com.ar+OR+anroca.com.ar+OR+elcordillerano.com.ar+OR+mejorinformado.com)&hl=es-419&gl=AR&ceid=AR:es-419'
+  },
+  {
+    tag: 'Perspectiva de Género',
+    rss: 'https://news.google.com/rss/search?q=(genero+OR+feminismos+OR+disidencias+OR+violencia+de+genero+OR+cuidados)+site:(rionegro.com.ar+OR+anroca.com.ar+OR+eldiarioar.com+OR+adnrionegro.com.ar)&hl=es-419&gl=AR&ceid=AR:es-419'
+  },
+  {
+    tag: 'UNCo (Fiske Menuco / Neuquén)',
+    rss: 'https://news.google.com/rss/search?q=("Universidad+Nacional+del+Comahue"+OR+UNCo+OR+FADECS+OR+"General+Roca"+OR+"Fiske+Menuco"+OR+Neuquen)+universidad&hl=es-419&gl=AR&ceid=AR:es-419'
   }
 ];
 
@@ -132,7 +139,7 @@ const FadecsWorkspace = () => {
     await setDoc(doc(db, 'config', 'general'), { roomsCount: boundedCount }, { merge: true });
   };
 
-  // 4. Búsqueda automática filtrada por los 5 ejes temáticos en los diarios seleccionados
+  // 4. Búsqueda automática filtrada por ejes
   const fetchLiveNews = async () => {
     setLoadingNews(true);
     try {
@@ -253,7 +260,7 @@ const FadecsWorkspace = () => {
     const trimmedUrl = docInput.trim();
     
     if (!isValidGoogleUrl(trimmedUrl)) {
-      setDocError('Por seguridad, solo se permiten enlaces oficiales de Google Docs o Google Drive (https://docs.google.com/...).');
+      setDocError('Por seguridad, solo se permiten enlaces oficiales de Google Docs o Google Drive.');
       return;
     }
 
@@ -270,7 +277,16 @@ const FadecsWorkspace = () => {
     setDocError('');
   };
 
-  const categories = ['Todas', 'Ambiente y Extractivismo', 'Comunidades Originarias', 'Políticas de Inversión (RIGI)', 'Reconfiguración Laboral', 'Desigualdad Socio-territorial'];
+  const categories = [
+    'Todas', 
+    'Ambiente y Extractivismo', 
+    'Comunidades Originarias', 
+    'Políticas de Inversión (RIGI)', 
+    'Reconfiguración Laboral', 
+    'Desigualdad Socio-territorial',
+    'Perspectiva de Género',
+    'UNCo (Fiske Menuco / Neuquén)'
+  ];
   const filteredNews = selectedCategory === 'Todas' ? newsList : newsList.filter(n => n.tag === selectedCategory);
 
   // PANTALLA DE LOGIN
@@ -362,7 +378,7 @@ const FadecsWorkspace = () => {
             <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-4">
               <div>
                 <h2 className="text-2xl md:text-3xl font-bold text-orange-800">Actualidad Regional por Ejes Temáticos</h2>
-                <p className="text-xs md:text-sm text-orange-600 mt-1">Monitoreo de medios patagónicos sobre extractivismo, territorio, pueblos originarios, RIGI y trabajo.</p>
+                <p className="text-xs md:text-sm text-orange-600 mt-1">Monitoreo de medios patagónicos, género y novedades de la UNCo (Fiske Menuco y Neuquén).</p>
               </div>
               <div className="flex flex-wrap gap-2">
                 <button onClick={fetchLiveNews} className="px-3 py-2 bg-orange-200 text-orange-900 rounded-lg font-semibold text-xs md:text-sm hover:bg-orange-300 transition-colors">
@@ -418,7 +434,7 @@ const FadecsWorkspace = () => {
                   onClick={() => setMobileRoomTab('doc')} 
                   className={`flex-1 py-2.5 text-xs font-bold text-center border-b-2 ${mobileRoomTab === 'doc' ? 'border-orange-500 text-orange-900 bg-white' : 'border-transparent text-orange-600'}`}
                 >
-                  📄 Ver Documento
+                  📄 Documento Sala
                 </button>
                 <button 
                   onClick={() => setMobileRoomTab('chat')} 
@@ -429,13 +445,13 @@ const FadecsWorkspace = () => {
               </div>
             )}
 
-            {/* ZONA DE DOCUMENTO */}
+            {/* ZONA DE DOCUMENTO (ACCESO DIRECTO + CONFIGURACIÓN) */}
             {currentView.startsWith('sala-') && (
               <div className={`${mobileRoomTab === 'doc' ? 'flex' : 'hidden'} md:flex flex-1 flex-col border-r border-orange-200 bg-white h-full overflow-hidden`}>
                 <div className="p-3 md:p-4 bg-orange-100/30 border-b border-orange-200">
                   <div className="bg-yellow-50 border-l-4 border-yellow-400 p-2 mb-2.5">
                     <p className="text-xs text-yellow-800">
-                      ⚠️ <strong>Importante:</strong> Compartir este documento solo con los integrantes del grupo y coordinación.
+                      ⚠️ <strong>Aviso:</strong> Por políticas de seguridad de Google, los documentos se editan de forma óptima abriéndolos en una pestaña propia.
                     </p>
                   </div>
                   <form onSubmit={handleDocSubmit} className="flex gap-2">
@@ -443,24 +459,39 @@ const FadecsWorkspace = () => {
                       type="url" 
                       value={docInput} 
                       onChange={(e) => setDocInput(e.target.value)} 
-                      placeholder="Pega el enlace de Google Docs (https://docs.google.com/...)" 
+                      placeholder="Actualizar enlace de Google Docs..." 
                       className="flex-1 px-3 py-1.5 md:py-2 border border-orange-300 rounded text-xs md:text-sm focus:ring-2 focus:ring-orange-400 outline-none" 
                     />
-                    <button type="submit" className="px-3 md:px-4 py-1.5 md:py-2 bg-orange-500 text-white rounded font-semibold text-xs md:text-sm hover:bg-orange-600 whitespace-nowrap">Incrustar</button>
+                    <button type="submit" className="px-3 md:px-4 py-1.5 md:py-2 bg-orange-500 text-white rounded font-semibold text-xs md:text-sm hover:bg-orange-600 whitespace-nowrap">Guardar link</button>
                   </form>
                   {docError && <p className="text-xs text-red-600 mt-1.5 font-semibold">{docError}</p>}
                 </div>
-                <div className="flex-1 bg-gray-50 p-1 md:p-2 overflow-hidden">
+
+                <div className="flex-1 bg-orange-50/40 p-6 flex flex-col items-center justify-center text-center">
                   {activeDocUrl && isValidGoogleUrl(activeDocUrl) ? (
-                    <iframe 
-                      src={activeDocUrl} 
-                      className="w-full h-full border-0 rounded shadow-inner" 
-                      title="Documento Colaborativo"
-                      referrerPolicy="no-referrer"
-                      sandbox="allow-scripts allow-same-origin allow-forms allow-popups"
-                    />
+                    <div className="bg-white p-8 rounded-xl shadow-md border border-orange-200 max-w-md w-full flex flex-col items-center">
+                      <div className="w-16 h-16 bg-orange-100 text-orange-600 rounded-full flex items-center justify-center text-2xl mb-4 shadow-inner">
+                        📄
+                      </div>
+                      <h3 className="text-lg font-bold text-orange-900 mb-2">Documento de la Sala Activo</h3>
+                      <p className="text-xs text-orange-600 mb-6">
+                        Haz clic en el botón de abajo para abrir el documento colaborativo en una pestaña nueva y editarlo con tu cuenta.
+                      </p>
+                      <a 
+                        href={sanitizeHttpUrl(activeDocUrl)} 
+                        target="_blank" 
+                        rel="noopener noreferrer"
+                        className="w-full py-3 px-4 bg-orange-500 text-white rounded-lg font-bold text-sm shadow hover:bg-orange-600 transition-all flex items-center justify-center gap-2"
+                      >
+                        <span>Abrir documento y editar en Google Docs</span>
+                        <span className="text-base">↗</span>
+                      </a>
+                    </div>
                   ) : (
-                    <div className="h-full flex items-center justify-center text-orange-400 text-xs md:text-sm p-4 text-center">No hay un documento activo en esta sala.</div>
+                    <div className="text-orange-400 text-sm max-w-xs">
+                      <p className="font-semibold mb-1">Sin documento asignado</p>
+                      <p className="text-xs opacity-80">Pega el enlace oficial de Google Docs en el cuadro superior para que todo el grupo pueda acceder.</p>
+                    </div>
                   )}
                 </div>
               </div>
