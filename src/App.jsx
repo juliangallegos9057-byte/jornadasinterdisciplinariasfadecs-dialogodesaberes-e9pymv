@@ -518,7 +518,7 @@ const FadecsWorkspace = () => {
     return (
       <div className="flex h-screen bg-orange-50 items-center justify-center font-sans p-4">
         <div className="bg-white p-6 md:p-8 rounded-xl shadow-lg border border-orange-200 text-center max-w-md w-full">
-          <h1 className="text-2xl md:text-3xl font-bold text-orange-800 mb-2">JIFADECS 2026</h1>
+          <h1 className="text-2xl md:text-3xl font-bold text-orange-800 mb-2">JIFADECS 2027</h1>
           <p className="text-sm md:text-base text-orange-600 mb-8">Diálogo de saberes para los desafíos contemporáneos</p>
           <button onClick={login} className="w-full bg-orange-500 text-white font-bold py-3 px-4 rounded-lg hover:bg-orange-600 transition-colors shadow-md">
             Iniciar sesión con Google
@@ -535,7 +535,7 @@ const FadecsWorkspace = () => {
       {/* CABECERA MÓVIL */}
       <div className="md:hidden flex items-center justify-between p-3 bg-orange-200 border-b border-orange-300 shadow-sm z-20">
         <div>
-          <h1 className="text-lg font-bold text-orange-900 leading-tight">JIFADECS 2026</h1>
+          <h1 className="text-lg font-bold text-orange-900 leading-tight">JIFADECS 2027</h1>
           <p className="text-[11px] text-orange-700 truncate max-w-[200px]">{user.displayName}</p>
         </div>
         <button
@@ -549,7 +549,7 @@ const FadecsWorkspace = () => {
       {/* BARRA LATERAL */}
       <div className={`${isMobileMenuOpen ? 'fixed inset-0 top-[57px] z-30 flex' : 'hidden'} md:relative md:top-0 md:flex w-full md:w-64 bg-orange-100 border-r border-orange-200 flex-col shadow-sm`}>
         <div className="hidden md:block p-4 border-b border-orange-200 bg-orange-200/50">
-          <h1 className="text-xl font-bold text-orange-800">JIFADECS 2026</h1>
+          <h1 className="text-xl font-bold text-orange-800">JIFADECS 2027</h1>
           <p className="text-xs text-orange-700 mt-1 truncate">{user.displayName}</p>
           <button onClick={logout} className="text-xs text-orange-500 hover:text-orange-800 mt-2 font-semibold">Cerrar sesión</button>
         </div>
