@@ -19,9 +19,43 @@ const auth = getAuth(app);
 const db = getFirestore(app);
 const provider = new GoogleAuthProvider();
 
-// Enlace al Repositorio Bibliográfico de Google Drive
+// Constantes globales
 const DRIVE_REPO_URL = "https://drive.google.com/drive/folders/1E-9JMFs1ot4Y1Omp_OJSbcl3Ilu_PfH3";
 const MAX_MSG_LENGTH = 1000;
+const NEWS_CACHE_TTL_MS = 5 * 60 * 1000; // 5 minutos de caché para proteger límite de API
+
+// Normalizador de texto: convierte a minúsculas y elimina todas las tildes/diacríticos
+const normalizeText = (str) => {
+  if (!str) return '';
+  return str
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '');
+};
+
+// Generador de hash determinista (integridad y deduplicación de IDs sin colisiones)
+const createDeterministicHash = (input) => {
+  const clean = normalizeText(input);
+  let hash = 0x811c9dc5;
+  for (let i = 0; i < clean.length; i++) {
+    hash ^= clean.charCodeAt(i);
+    hash = Math.imul(hash, 0x01000193);
+  }
+  return 'argon-' + (hash >>> 0).toString(16);
+};
+
+// Limpiador de etiquetas HTML y entidades para descripciones RSS
+const stripHtml = (html) => {
+  if (!html) return '';
+  return html
+    .replace(/<[^>]*>?/gm, ' ')
+    .replace(/&nbsp;/gi, ' ')
+    .replace(/&amp;/gi, '&')
+    .replace(/&quot;/gi, '"')
+    .replace(/&#39;/gi, "'")
+    .replace(/\s+/g, ' ')
+    .trim();
+};
 
 // Validador de seguridad para URLs de Google Docs / Drive
 const isValidGoogleUrl = (urlString) => {
@@ -37,7 +71,7 @@ const isValidGoogleUrl = (urlString) => {
   }
 };
 
-// Sanitizador de enlaces externos de noticias
+// Sanitizador de enlaces externos de noticias (previene XSS por javascript: o data:)
 const sanitizeHttpUrl = (urlString) => {
   try {
     const parsed = new URL(urlString);
@@ -47,67 +81,172 @@ const sanitizeHttpUrl = (urlString) => {
   }
 };
 
-// Palabras prohibidas globales para evitar ruido (accidentes, policiales, deportes, farándula)
-const globalExclusions = ['accidente', 'choque', 'muerto', 'fallecido', 'policial', 'detenido', 'robo', 'clima', 'pronostico', 'futbol', 'partido', 'papa', 'vaticano', 'espectaculo', 'famosos'];
+// Palabras prohibidas globales (sin tildes, ya que se comparan contra texto normalizado)
+const globalExclusions = [
+  'accidente', 'choque', 'volco', 'vuelco', 'muerto', 'fallecio', 'fallecido', 'fatal',
+  'policial', 'detenido', 'robo', 'asaltaron', 'crimen', 'homicidio', 'autopsia',
+  'clima', 'pronostico', 'meteorologico', 'futbol', 'torneo', 'partido', 'colapinto',
+  'papa francisco', 'vaticano', 'espectaculo', 'famosos', 'farandula', 'horoscopo',
+  'arroyo', 'cayo al', 'cruzar el', 'cruzaba', 'rescate', 'rescataron', 'bomberos',
+  'ahogado', 'desaparecido', 'buscan a', 'ambulancia', 'heridos', 'hospitalizaron'
+];
 
-// Función de validación metodológica y temática estricta
+// Validador metodológico estricto por intersección conceptual
 const passesStrictFilter = (title, snippet, category) => {
-  const text = (title + ' ' + snippet).toLowerCase();
-  
-  // 1. Verificar exclusiones globales
+  const normText = normalizeText(`${title} ${snippet}`);
+
+  // 1. Bloqueo inmediato si contiene cualquier término policial, vial o de accidentes
   for (const badWord of globalExclusions) {
-    if (text.includes(badWord)) return false;
+    if (normText.includes(badWord)) return false;
   }
 
-  // 2. Validaciones específicas por eje metodológico
+  // 2. Reglas de intersección por eje temático
+  if (category === 'Extractivismo y Minería') {
+    const coreResource = [
+      'extractiv', 'mineria', 'minero', 'minera', 'fracking', 'hidrocarburo',
+      'petroleo', 'petrolera', 'litio', 'uranio', 'oleoducto', 'vaca muerta',
+      'golfo san matias', 'megamineria', 'calcatreu', 'represa'
+    ];
+    const socialImpact = [
+      'agua', 'comunidad', 'ambiental', 'socioambiental', 'contaminacion', 'derrame',
+      'territorio', 'audiencia', 'asamblea', 'vecinos', 'rechazo', 'impacto',
+      'explotacion', 'pasivo', 'recurso', 'inversion', 'aprobacion', 'proyecto'
+    ];
+    return coreResource.some(w => normText.includes(w)) && socialImpact.some(w => normText.includes(w));
+  }
+
+  if (category === 'Desigualdades Socio-Territoriales') {
+    const inequalityTerms = [
+      'pobreza', 'indigencia', 'desigualdad', 'alquiler', 'vivienda', 'habitacional',
+      'barrio popular', 'toma', 'asentamiento', 'tarifazo', 'servicios basicos',
+      'vulnerabilidad', 'territorial', 'canasta basica'
+    ];
+    return inequalityTerms.some(w => normText.includes(w));
+  }
+
+  if (category === 'Configuraciones y Reformas Laborales') {
+    const laborTerms = [
+      'reforma laboral', 'precarizacion', 'despido', 'sindicato', 'gremio',
+      'trabajador', 'paritaria', 'huelga', 'convenio colectivo', 'ajuste',
+      'flexibilizacion', 'empleo', 'salario', 'estabilidad laboral', 'ate', 'unter', 'adunc'
+    ];
+    return laborTerms.some(w => normText.includes(w));
+  }
+
+  if (category === 'Políticas de Inversión (RIGI / Súper RIGI)') {
+    const rigiTerms = ['rigi', 'super rigi', 'regimen de incentivo', 'grandes inversiones', 'exencion impositiva', 'inversion extractiva'];
+    return rigiTerms.some(w => normText.includes(w));
+  }
+
   if (category === 'Perspectiva de Género') {
-    const genderKeywords = ['genero', 'feminism', 'disidencias', 'mujeres', 'colectivo', 'cuidado', 'patriarcado', 'diversidad', 'LGBTIQ', 'violencia machista'];
-    return genderKeywords.some(kw => text.includes(kw));
+    const genderTerms = [
+      'perspectiva de genero', 'violencia de genero', 'violencia machista', 'feminism',
+      'disidencia', 'diversidad sexual', 'lgbti', 'trans', 'travesti', 'cuidado',
+      'patriarcado', 'femicidio', 'aborto', 'esi', 'paridad', 'ni una menos'
+    ];
+    return genderTerms.some(w => normText.includes(w));
   }
 
   if (category === 'UNCo (Fiske Menuco / Neuquén)') {
-    const uncoKeywords = ['unco', 'comahue', 'fadecs', 'general roca', 'fiske', 'neuquen', 'universidad', 'docentes', 'estudiantes', 'claustro'];
-    return uncoKeywords.some(kw => text.includes(kw));
+    const uncoTerms = ['unco', 'universidad nacional del comahue', 'fadecs', 'comahue', 'fiske menuco', 'adunc', 'fuco'];
+    return uncoTerms.some(w => normText.includes(w));
   }
 
   return true;
 };
 
-// Noticias base metodológicas curadas
+// Noticias base metodológicas curadas (Garantizan contenido alineado a las Jornadas en todo momento)
 const fallbackNews = [
-  { id: 'base-1', tag: 'Extractivismo y Minería', title: 'Audiencia y resistencia socioambiental en defensa del Golfo San Matías frente al avance extractivista', date: '12 Nov 2026', source: 'Agencia Farco', url: 'https://agencia.farco.org.ar/', snippet: 'Debate interdisciplinario sobre el impacto en los bienes comunes y la mercantilización del territorio patagónico.' },
-  { id: 'base-2', tag: 'Desigualdades Socio-Territoriales', title: 'Renta hidrocarburífera y crisis habitacional: la brecha entre los enclaves de inversión y los barrios populares', date: '09 Nov 2026', source: 'Diario Río Negro', url: 'https://www.rionegro.com.ar/', snippet: 'Análisis crítico sobre el acceso desigual al suelo urbano y la precarización habitacional en el Alto Valle.' },
-  { id: 'base-3', tag: 'Configuraciones y Reformas Laborales', title: 'Impacto de la flexibilización laboral en la clase trabajadora regional y la reproducción de la vida', date: '04 Nov 2026', source: 'ANRoca', url: 'https://www.anroca.com.ar/', snippet: 'Reconfiguración de las condiciones de trabajo, pérdida de garantías y precarización en sectores clave de Neuquén y Río Negro.' },
-  { id: 'base-4', tag: 'Políticas de Inversión (RIGI / Súper RIGI)', title: 'Inversiones extraordinarias y asimetrías regionales: los saldos del RIGI en la Norpatagonia', date: '28 Oct 2026', source: 'VacaMuerta.ar', url: 'https://vacamuerta.ar/', snippet: 'Discusión teórica y práctica sobre los incentivos fiscales y el abismo de desigualdad en la estructura productiva.' },
-  { id: 'base-5', tag: 'Perspectiva de Género', title: 'Organización comunitaria y feminismos populares frente a la crisis y ajuste en la Patagonia', date: '20 Oct 2026', source: 'elDiarioAR', url: 'https://www.eldiarioar.com/', snippet: 'Reflexiones sobre las tareas de cuidado, la división sexual del trabajo y la resistencia colectiva.' },
-  { id: 'base-6', tag: 'UNCo (Fiske Menuco / Neuquén)', title: 'Posicionamiento de la comunidad FADECS-UNCo en defensa de la educación pública y la función social', date: '15 Oct 2026', source: 'UNCo Informa', url: 'https://neuqueninforma.gob.ar/', snippet: 'Articulación entre conocimiento académico, extensión crítica y compromiso territorial en Fiske Menuco.' }
+  {
+    id: 'base-extract-1',
+    tag: 'Extractivismo y Minería',
+    title: 'Proyectos extractivos aprobados, disputa por el acceso al agua y la otra cara de las inversiones en la Norpatagonia',
+    date: 'Nov 2026',
+    source: 'Agencia Farco / Red Regional',
+    url: 'https://agencia.farco.org.ar/',
+    snippet: 'Las problemáticas sociales que acarrea el avance minero e hidrocarburífero en la zona: tensiones entre empresas explotadoras y comunidades por el uso del agua.'
+  },
+  {
+    id: 'base-extract-2',
+    tag: 'Extractivismo y Minería',
+    title: 'Audiencias públicas y resistencia socioambiental en defensa del Golfo San Matías y los ríos patagónicos',
+    date: 'Nov 2026',
+    source: 'Diario Río Negro',
+    url: 'https://www.rionegro.com.ar/',
+    snippet: 'Asambleas socioambientales y comunidades locales advierten sobre los pasivos ambientales y el costo social oculto detrás de los anuncios de inversión.'
+  },
+  {
+    id: 'base-desig-1',
+    tag: 'Desigualdades Socio-Territoriales',
+    title: 'Renta extractiva vs. acceso al hábitat: la brecha socio-territorial para los trabajadores en Río Negro y Neuquén',
+    date: 'Nov 2026',
+    source: 'ANRoca',
+    url: 'https://www.anroca.com.ar/',
+    snippet: 'El contraste entre las promesas de derrame económico de las inversiones y la realidad de los alquileres, servicios y acceso al trabajo en los barrios.'
+  },
+  {
+    id: 'base-laboral-1',
+    tag: 'Configuraciones y Reformas Laborales',
+    title: 'Reformas laborales y precarización: el impacto sobre la estabilidad y reproducción de la vida de los trabajadores',
+    date: 'Nov 2026',
+    source: 'Diario Río Negro',
+    url: 'https://www.rionegro.com.ar/',
+    snippet: 'Análisis de la pérdida de garantías laborales, tercerización y reconfiguración de los derechos colectivos frente al actual marco normativo.'
+  },
+  {
+    id: 'base-rigi-1',
+    tag: 'Políticas de Inversión (RIGI / Súper RIGI)',
+    title: 'Tensiones derivadas del RIGI y Súper RIGI: concesiones fiscales y asimetrías en la estructura productiva regional',
+    date: 'Nov 2026',
+    source: 'VacaMuerta.ar',
+    url: 'https://vacamuerta.ar/',
+    snippet: 'Debate sobre las políticas de incentivo a las grandes inversiones y el abismo de desigualdad en la generación real de empleo local.'
+  },
+  {
+    id: 'base-genero-1',
+    tag: 'Perspectiva de Género',
+    title: 'Sobrecarga en las tareas de cuidado, precarización y agendas transfeministas en el contexto regional',
+    date: 'Nov 2026',
+    source: 'elDiarioAR',
+    url: 'https://www.eldiarioar.com/',
+    snippet: 'Cómo impactan el ajuste socioeconómico y la reconfiguración laboral de manera diferenciada sobre mujeres y disidencias en el territorio.'
+  },
+  {
+    id: 'base-unco-1',
+    tag: 'UNCo (Fiske Menuco / Neuquén)',
+    title: 'Interdisciplinariedad, extensión crítica y defensa de la universidad pública en FADECS (Fiske Menuco) y Neuquén',
+    date: 'Nov 2026',
+    source: 'UNCo Informa',
+    url: 'https://neuqueninforma.gob.ar/',
+    snippet: 'Articulación entre teoría y práctica para vincular la producción académica de estudiantes, docentes y graduados con las problemáticas del territorio.'
+  }
 ];
 
-// Consultas RSS afinadas con exclusión directa de términos no deseados
+// Consultas RSS optimizadas con sintaxis compatible con Google News
 const thematicFeeds = [
   {
     tag: 'Extractivismo y Minería',
-    rss: 'https://news.google.com/rss/search?q=(extractivismo+OR+mineria+OR+fracking+OR+ambiental+OR+agua+-accidente+-choque+-policial)+site:(rionegro.com.ar+OR+anroca.com.ar+OR+mejorinformado.com+OR+elcordillerano.com.ar)&hl=es-419&gl=AR&ceid=AR:es-419'
+    rss: 'https://news.google.com/rss/search?q=(extractivismo+OR+megamineria+OR+fracking+OR+"Golfo+San+Matias"+OR+Calcatreu)+(agua+OR+ambiental+OR+comunidades+OR+contaminacion)+("Rio+Negro"+OR+Neuquen)+-accidente+-choque+-policial&hl=es-419&gl=AR&ceid=AR:es-419'
   },
   {
     tag: 'Desigualdades Socio-Territoriales',
-    rss: 'https://news.google.com/rss/search?q=(pobreza+OR+desigualdad+OR+alquileres+OR+vivienda+OR+"barrios+populares"+OR+tomas+-accidente+-choque)+site:(rionegro.com.ar+OR+anroca.com.ar+OR+mejorinformado.com)&hl=es-419&gl=AR&ceid=AR:es-419'
+    rss: 'https://news.google.com/rss/search?q=(desigualdad+OR+pobreza+OR+"crisis+habitacional"+OR+alquileres+OR+"barrios+populares")+("Rio+Negro"+OR+Neuquen)+-accidente+-choque+-policial&hl=es-419&gl=AR&ceid=AR:es-419'
   },
   {
     tag: 'Configuraciones y Reformas Laborales',
-    rss: 'https://news.google.com/rss/search?q=("reforma+laboral"+OR+precarizacion+OR+despidos+OR+sindicatos+OR+trabajadores+OR+empleo+-accidente+-choque)+site:(rionegro.com.ar+OR+anroca.com.ar+OR+elperiodicoderincon.com.ar)&hl=es-419&gl=AR&ceid=AR:es-419'
+    rss: 'https://news.google.com/rss/search?q=("reforma+laboral"+OR+precarizacion+OR+despidos+OR+paritarias+OR+sindicatos)+("Rio+Negro"+OR+Neuquen)+-accidente+-choque+-policial&hl=es-419&gl=AR&ceid=AR:es-419'
   },
   {
     tag: 'Políticas de Inversión (RIGI / Súper RIGI)',
-    rss: 'https://news.google.com/rss/search?q=(RIGI+OR+"Super+RIGI"+OR+"Vaca+Muerta"+inversiones+-accidente+-futbol)+site:(rionegro.com.ar+OR+mejorinformado.com+OR+lmcipolletti.com.ar)&hl=es-419&gl=AR&ceid=AR:es-419'
+    rss: 'https://news.google.com/rss/search?q=(RIGI+OR+"Super+RIGI")+(inversiones+OR+"Vaca+Muerta"+OR+mineria)+("Rio+Negro"+OR+Neuquen)+-accidente+-futbol&hl=es-419&gl=AR&ceid=AR:es-419'
   },
   {
     tag: 'Perspectiva de Género',
-    rss: 'https://news.google.com/rss/search?q=("perspectiva+de+genero"+OR+"violencia+de+genero"+OR+feminismos+OR+disidencias+OR+"tareas+de+cuidado"+-accidente+-choque+-fallecido)+("Rio+Negro"+OR+Neuquen)&hl=es-419&gl=AR&ceid=AR:es-419'
+    rss: 'https://news.google.com/rss/search?q=("perspectiva+de+genero"+OR+"violencia+de+genero"+OR+feminismo+OR+disidencias+OR+"tareas+de+cuidado")+("Rio+Negro"+OR+Neuquen)+-accidente+-choque+-vial+-papa&hl=es-419&gl=AR&ceid=AR:es-419'
   },
   {
     tag: 'UNCo (Fiske Menuco / Neuquén)',
-    rss: 'https://news.google.com/rss/search?q=("Universidad+Nacional+del+Comahue"+OR+UNCo+OR+FADECS+OR+"General+Roca"+OR+"Fiske+Menuco"+OR+Neuquen)+universidad+-accidente+-futbol&hl=es-419&gl=AR&ceid=AR:es-419'
+    rss: 'https://news.google.com/rss/search?q=("Universidad+Nacional+del+Comahue"+OR+UNCo+OR+FADECS)+("General+Roca"+OR+"Fiske+Menuco"+OR+Neuquen)+-accidente+-choque+-futbol&hl=es-419&gl=AR&ceid=AR:es-419'
   }
 ];
 
@@ -121,7 +260,7 @@ const FadecsWorkspace = () => {
   const [messages, setMessages] = useState([]);
   const [newMessage, setNewMessage] = useState('');
   const [isSending, setIsSending] = useState(false);
-  
+
   const [editingMsgId, setEditingMsgId] = useState(null);
   const [editingText, setEditingText] = useState('');
 
@@ -132,6 +271,7 @@ const FadecsWorkspace = () => {
   const [loadingNews, setLoadingNews] = useState(false);
 
   const chatEndRef = useRef(null);
+  const lastFetchTimeRef = useRef(0);
   const isAdmin = user?.email === 'juliangallegos9057@gmail.com';
 
   // 2. Control de Sesión
@@ -142,7 +282,14 @@ const FadecsWorkspace = () => {
     return () => unsubscribe();
   }, []);
 
-  const login = () => signInWithPopup(auth, provider);
+  const login = async () => {
+    try {
+      await signInWithPopup(auth, provider);
+    } catch (err) {
+      console.error('Error al iniciar sesión:', err);
+    }
+  };
+
   const logout = () => signOut(auth);
 
   // 3. Sincronización de Cantidad de Salas
@@ -161,55 +308,78 @@ const FadecsWorkspace = () => {
     if (!isAdmin) return;
     const boundedCount = Math.min(Math.max(1, newCount), 30);
     setRoomsCount(boundedCount);
-    await setDoc(doc(db, 'config', 'general'), { roomsCount: boundedCount }, { merge: true });
+    try {
+      await setDoc(doc(db, 'config', 'general'), { roomsCount: boundedCount }, { merge: true });
+    } catch (err) {
+      console.error('Error al actualizar cantidad de salas:', err);
+    }
   };
 
-  // 4. Búsqueda automática con doble filtro metodológico (RSS + Validación interna)
-  const fetchLiveNews = async () => {
+  // 4. Búsqueda automática con filtro metodológico, deduplicación por hash y caché
+  const fetchLiveNews = async (forceRefresh = false) => {
+    const now = Date.now();
+    if (!forceRefresh && now - lastFetchTimeRef.current < NEWS_CACHE_TTL_MS) {
+      return;
+    }
+
     setLoadingNews(true);
     try {
       const promises = thematicFeeds.map(async (feed) => {
         const apiUrl = `https://api.rss2json.com/v1/api.json?rss_url=${encodeURIComponent(feed.rss)}`;
         const res = await fetch(apiUrl);
+        if (!res.ok) return [];
         const data = await res.json();
-        if (data.items) {
-          return data.items
-            .filter(item => passesStrictFilter(item.title, item.description || '', feed.tag))
-            .slice(0, 4)
-            .map((item, idx) => {
-              const titleParts = item.title.split(' - ');
-              const cleanTitle = titleParts.length > 1 ? titleParts.slice(0, -1).join(' - ') : item.title;
-              const sourceName = titleParts.length > 1 ? titleParts[titleParts.length - 1] : (item.author || 'Medio Regional');
+        if (!data.items || !Array.isArray(data.items)) return [];
 
-              return {
-                id: `${feed.tag}-${idx}-${Date.now()}`,
-                tag: feed.tag,
-                title: cleanTitle,
-                date: new Date(item.pubDate).toLocaleDateString('es-AR', { day: 'numeric', month: 'short', year: 'numeric' }),
-                source: sourceName,
-                url: sanitizeHttpUrl(item.link),
-                snippet: item.description ? item.description.replace(/<[^>]+>/g, '').slice(0, 140) + '...' : `Análisis crítico vinculado al eje de ${feed.tag}.`
-              };
-            });
-        }
-        return [];
+        return data.items
+          .map((item) => {
+            const titleParts = (item.title || '').split(' - ');
+            const cleanTitle = titleParts.length > 1 ? titleParts.slice(0, -1).join(' - ').trim() : (item.title || '').trim();
+            const sourceName = titleParts.length > 1 ? titleParts[titleParts.length - 1].trim() : (item.author || 'Medio Regional');
+            const cleanDesc = stripHtml(item.description || '');
+
+            return {
+              id: createDeterministicHash(`${feed.tag}-${cleanTitle}`),
+              tag: feed.tag,
+              title: cleanTitle,
+              date: item.pubDate ? new Date(item.pubDate).toLocaleDateString('es-AR', { day: 'numeric', month: 'short', year: 'numeric' }) : 'Actualidad',
+              source: sourceName,
+              url: sanitizeHttpUrl(item.link),
+              snippet: cleanDesc.length > 25 ? cleanDesc.slice(0, 160) + '...' : `Artículo periodístico vinculado al eje ${feed.tag} en la región.`
+            };
+          })
+          .filter(article => passesStrictFilter(article.title, article.snippet, feed.tag))
+          .slice(0, 3);
       });
 
       const results = await Promise.all(promises);
       const combinedLive = results.flat();
 
-      if (combinedLive.length > 0) {
-        setNewsList([...combinedLive, ...fallbackNews]);
+      // Deduplicar artículos por hash determinista manteniendo siempre la base curada
+      const seenHashes = new Set();
+      const mergedList = [];
+
+      for (const item of [...combinedLive, ...fallbackNews]) {
+        const key = createDeterministicHash(item.title);
+        if (!seenHashes.has(key)) {
+          seenHashes.add(key);
+          mergedList.push(item);
+        }
       }
+
+      setNewsList(mergedList);
+      lastFetchTimeRef.current = Date.now();
     } catch (err) {
-      console.error('Error al actualizar feeds temáticos, usando respaldo:', err);
+      console.error('Error al actualizar feeds temáticos, manteniendo base metodológica:', err);
+      setNewsList(fallbackNews);
+    } finally {
+      setLoadingNews(false);
     }
-    setLoadingNews(false);
   };
 
   useEffect(() => {
     if (currentView === 'noticias') {
-      fetchLiveNews();
+      fetchLiveNews(false);
     }
   }, [currentView]);
 
@@ -220,7 +390,7 @@ const FadecsWorkspace = () => {
 
     const q = query(collection(db, 'salas', currentView, 'mensajes'), orderBy('createdAt', 'asc'));
     const unsubChat = onSnapshot(q, (snapshot) => {
-      setMessages(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
+      setMessages(snapshot.docs.map(docSnap => ({ id: docSnap.id, ...docSnap.data() })));
       setTimeout(() => chatEndRef.current?.scrollIntoView({ behavior: 'smooth' }), 100);
     });
 
@@ -239,7 +409,7 @@ const FadecsWorkspace = () => {
     return () => { unsubChat(); unsubDoc(); };
   }, [currentView, user]);
 
-  // 6. Enviar, Editar y Borrar Mensajes
+  // 6. Enviar, Editar y Borrar Mensajes con manejo de errores
   const sendMessage = async (e) => {
     e.preventDefault();
     const trimmed = newMessage.trim();
@@ -257,13 +427,18 @@ const FadecsWorkspace = () => {
     } catch (err) {
       console.error('Error al enviar mensaje:', err);
       setNewMessage(trimmed);
+    } finally {
+      setIsSending(false);
     }
-    setIsSending(false);
   };
 
   const handleDeleteMessage = async (msgId) => {
     if (window.confirm('¿Seguro que deseas eliminar este mensaje?')) {
-      await deleteDoc(doc(db, 'salas', currentView, 'mensajes', msgId));
+      try {
+        await deleteDoc(doc(db, 'salas', currentView, 'mensajes', msgId));
+      } catch (err) {
+        console.error('Error al eliminar mensaje:', err);
+      }
     }
   };
 
@@ -275,18 +450,22 @@ const FadecsWorkspace = () => {
   const saveEditMessage = async (msgId) => {
     const trimmed = editingText.trim();
     if (!trimmed || trimmed.length > MAX_MSG_LENGTH) return;
-    await updateDoc(doc(db, 'salas', currentView, 'mensajes', msgId), {
-      text: trimmed,
-      edited: true
-    });
-    setEditingMsgId(null);
-    setEditingText('');
+    try {
+      await updateDoc(doc(db, 'salas', currentView, 'mensajes', msgId), {
+        text: trimmed,
+        edited: true
+      });
+      setEditingMsgId(null);
+      setEditingText('');
+    } catch (err) {
+      console.error('Error al editar mensaje:', err);
+    }
   };
 
   const handleDocSubmit = async (e) => {
     e.preventDefault();
     const trimmedUrl = docInput.trim();
-    
+
     if (!isValidGoogleUrl(trimmedUrl)) {
       setDocError('Por seguridad, solo se permiten enlaces oficiales de Google Docs o Google Drive.');
       return;
@@ -295,7 +474,12 @@ const FadecsWorkspace = () => {
     setDocError('');
     setActiveDocUrl(trimmedUrl);
     setDocInput('');
-    await setDoc(doc(db, 'salas', currentView), { docUrl: trimmedUrl }, { merge: true });
+    try {
+      await setDoc(doc(db, 'salas', currentView), { docUrl: trimmedUrl }, { merge: true });
+    } catch (err) {
+      console.error('Error al guardar enlace del documento:', err);
+      setDocError('No se pudo guardar el enlace. Verifica tu conexión.');
+    }
   };
 
   const selectView = (view) => {
@@ -306,11 +490,11 @@ const FadecsWorkspace = () => {
   };
 
   const categories = [
-    'Todas', 
-    'Extractivismo y Minería', 
-    'Desigualdades Socio-Territoriales', 
-    'Configuraciones y Reformas Laborales', 
-    'Políticas de Inversión (RIGI / Súper RIGI)', 
+    'Todas',
+    'Extractivismo y Minería',
+    'Desigualdades Socio-Territoriales',
+    'Configuraciones y Reformas Laborales',
+    'Políticas de Inversión (RIGI / Súper RIGI)',
     'Perspectiva de Género',
     'UNCo (Fiske Menuco / Neuquén)'
   ];
@@ -334,15 +518,15 @@ const FadecsWorkspace = () => {
   // INTERFAZ PRINCIPAL ADAPTABLE
   return (
     <div className="flex flex-col md:flex-row h-screen bg-orange-50 font-sans text-orange-900 overflow-hidden">
-      
+
       {/* CABECERA MÓVIL */}
       <div className="md:hidden flex items-center justify-between p-3 bg-orange-200 border-b border-orange-300 shadow-sm z-20">
         <div>
           <h1 className="text-lg font-bold text-orange-900 leading-tight">JIFADECS 2026</h1>
           <p className="text-[11px] text-orange-700 truncate max-w-[200px]">{user.displayName}</p>
         </div>
-        <button 
-          onClick={() => setIsMobileMenuOpen(!isMobileMenuOpen)} 
+        <button
+          onClick={() => setIsMobileMenuOpen(!isMobileMenuOpen)}
           className="px-3 py-1.5 bg-orange-500 text-white rounded-md font-bold text-sm shadow"
         >
           {isMobileMenuOpen ? '✕ Cerrar' : '☰ Menú / Salas'}
@@ -356,16 +540,16 @@ const FadecsWorkspace = () => {
           <p className="text-xs text-orange-700 mt-1 truncate">{user.displayName}</p>
           <button onClick={logout} className="text-xs text-orange-500 hover:text-orange-800 mt-2 font-semibold">Cerrar sesión</button>
         </div>
-        
+
         <div className="flex-1 overflow-y-auto p-4 space-y-4">
           <div>
             <h2 className="text-xs font-semibold text-orange-500 uppercase tracking-wider mb-2">General</h2>
             <button onClick={() => selectView('chat-general')} className={`w-full text-left px-3 py-2.5 rounded-md transition-colors text-sm font-medium ${currentView === 'chat-general' ? 'bg-orange-500 text-white shadow' : 'hover:bg-orange-200 text-orange-800'}`}>💬 Chat General</button>
             <button onClick={() => selectView('noticias')} className={`w-full text-left px-3 py-2.5 rounded-md transition-colors mt-1 text-sm font-medium ${currentView === 'noticias' ? 'bg-orange-500 text-white shadow' : 'hover:bg-orange-200 text-orange-800'}`}>📰 Ejes y Noticias</button>
-            <a 
-              href={DRIVE_REPO_URL} 
-              target="_blank" 
-              rel="noopener noreferrer" 
+            <a
+              href={DRIVE_REPO_URL}
+              target="_blank"
+              rel="noopener noreferrer"
               className="w-full text-left px-3 py-2.5 rounded-md transition-colors mt-1 text-sm font-medium hover:bg-orange-200 text-orange-800 flex items-center justify-between"
             >
               <span>📚 Repositorio Bibliográfico</span>
@@ -405,16 +589,20 @@ const FadecsWorkspace = () => {
             <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-4">
               <div>
                 <h2 className="text-2xl md:text-3xl font-bold text-orange-800">Actualidad Regional y Ejes Metodológicos</h2>
-                <p className="text-xs md:text-sm text-orange-600 mt-1">Análisis territorial crítico, extractivismo, desigualdades, trabajo, género y vida universitaria (UNCo).</p>
+                <p className="text-xs md:text-sm text-orange-600 mt-1">Análisis territorial crítico, extractivismo, agua, desigualdades, trabajo, género y UNCo (Fiske Menuco / Neuquén).</p>
               </div>
               <div className="flex flex-wrap gap-2">
-                <button onClick={fetchLiveNews} className="px-3 py-2 bg-orange-200 text-orange-900 rounded-lg font-semibold text-xs md:text-sm hover:bg-orange-300 transition-colors">
-                  {loadingNews ? '🔄 Buscando notas...' : '🔄 Actualizar titulares'}
+                <button
+                  onClick={() => fetchLiveNews(true)}
+                  disabled={loadingNews}
+                  className="px-3 py-2 bg-orange-200 text-orange-900 rounded-lg font-semibold text-xs md:text-sm hover:bg-orange-300 transition-colors disabled:opacity-50"
+                >
+                  {loadingNews ? '🔄 Filtrando notas...' : '🔄 Actualizar titulares'}
                 </button>
-                <a 
-                  href="https://www.diariosargentinos.com.ar/web" 
-                  target="_blank" 
-                  rel="noreferrer" 
+                <a
+                  href="https://www.diariosargentinos.com.ar/web"
+                  target="_blank"
+                  rel="noopener noreferrer"
                   className="px-4 py-2 bg-orange-500 text-white rounded-lg font-bold text-xs md:text-sm hover:bg-orange-600 shadow transition-colors flex items-center gap-1"
                 >
                   🗞️ Kiosco Diarios Argentinos ↗
@@ -453,18 +641,18 @@ const FadecsWorkspace = () => {
           </div>
         ) : (
           <div className="flex-1 flex flex-col md:flex-row h-full overflow-hidden">
-            
+
             {/* SELECTOR DE PESTAÑAS EN MÓVIL */}
             {currentView.startsWith('sala-') && (
               <div className="md:hidden flex border-b border-orange-200 bg-orange-100">
-                <button 
-                  onClick={() => setMobileRoomTab('doc')} 
+                <button
+                  onClick={() => setMobileRoomTab('doc')}
                   className={`flex-1 py-2.5 text-xs font-bold text-center border-b-2 ${mobileRoomTab === 'doc' ? 'border-orange-500 text-orange-900 bg-white' : 'border-transparent text-orange-600'}`}
                 >
                   📄 Documento Sala
                 </button>
-                <button 
-                  onClick={() => setMobileRoomTab('chat')} 
+                <button
+                  onClick={() => setMobileRoomTab('chat')}
                   className={`flex-1 py-2.5 text-xs font-bold text-center border-b-2 ${mobileRoomTab === 'chat' ? 'border-orange-500 text-orange-900 bg-white' : 'border-transparent text-orange-600'}`}
                 >
                   💬 Debate ({messages.length})
@@ -478,16 +666,16 @@ const FadecsWorkspace = () => {
                 <div className="p-3 md:p-4 bg-orange-100/30 border-b border-orange-200">
                   <div className="bg-yellow-50 border-l-4 border-yellow-400 p-2 mb-2.5">
                     <p className="text-xs text-yellow-800">
-                      ⚠️ <strong>Aviso:</strong> Por políticas de seguridad de Google, los documentos se editan abriéndolos en una pestaña propia.
+                      ⚠️ <strong>Importante:</strong> Compartir este documento solo con los integrantes del grupo y coordinación.
                     </p>
                   </div>
                   <form onSubmit={handleDocSubmit} className="flex gap-2">
-                    <input 
-                      type="url" 
-                      value={docInput} 
-                      onChange={(e) => setDocInput(e.target.value)} 
-                      placeholder="Actualizar enlace de Google Docs..." 
-                      className="flex-1 px-3 py-1.5 md:py-2 border border-orange-300 rounded text-xs md:text-sm focus:ring-2 focus:ring-orange-400 outline-none" 
+                    <input
+                      type="url"
+                      value={docInput}
+                      onChange={(e) => setDocInput(e.target.value)}
+                      placeholder="Actualizar enlace de Google Docs..."
+                      className="flex-1 px-3 py-1.5 md:py-2 border border-orange-300 rounded text-xs md:text-sm focus:ring-2 focus:ring-orange-400 outline-none"
                     />
                     <button type="submit" className="px-3 md:px-4 py-1.5 md:py-2 bg-orange-500 text-white rounded font-semibold text-xs md:text-sm hover:bg-orange-600 whitespace-nowrap">Guardar link</button>
                   </form>
@@ -504,9 +692,9 @@ const FadecsWorkspace = () => {
                       <p className="text-xs text-orange-600 mb-6">
                         Haz clic en el botón de abajo para abrir el documento colaborativo en una pestaña nueva y editarlo con tu cuenta.
                       </p>
-                      <a 
-                        href={sanitizeHttpUrl(activeDocUrl)} 
-                        target="_blank" 
+                      <a
+                        href={sanitizeHttpUrl(activeDocUrl)}
+                        target="_blank"
                         rel="noopener noreferrer"
                         className="w-full py-3 px-4 bg-orange-500 text-white rounded-lg font-bold text-sm shadow hover:bg-orange-600 transition-all flex items-center justify-center gap-2"
                       >
@@ -531,7 +719,7 @@ const FadecsWorkspace = () => {
                   {currentView === 'chat-general' ? 'Chat General Interdisciplinario' : `Debate - ${currentView.replace('-', ' ')}`}
                 </h3>
               </div>
-              
+
               <div className="flex-1 p-3 md:p-4 overflow-y-auto bg-orange-50/30 flex flex-col gap-3">
                 {messages.length === 0 && <div className="text-center text-xs text-orange-400 mt-4">Comienza el debate...</div>}
                 {messages.map((msg) => {
@@ -542,7 +730,7 @@ const FadecsWorkspace = () => {
                         <span className={`text-[10px] font-bold ${isMine ? 'text-orange-100' : 'text-orange-600'}`}>
                           {msg.sender} {msg.edited && <span className="italic font-normal opacity-80">(editado)</span>}
                         </span>
-                        
+
                         {(isMine || isAdmin) && editingMsgId !== msg.id && (
                           <div className="flex items-center gap-1.5 opacity-80 hover:opacity-100">
                             {isMine && (
@@ -559,9 +747,9 @@ const FadecsWorkspace = () => {
 
                       {editingMsgId === msg.id ? (
                         <div className="mt-1 flex flex-col gap-1.5">
-                          <input 
-                            type="text" 
-                            value={editingText} 
+                          <input
+                            type="text"
+                            value={editingText}
                             maxLength={MAX_MSG_LENGTH}
                             onChange={(e) => setEditingText(e.target.value)}
                             className="w-full px-2 py-1 text-xs text-orange-900 bg-white rounded border border-orange-300 outline-none"
@@ -582,16 +770,16 @@ const FadecsWorkspace = () => {
               </div>
 
               <form onSubmit={sendMessage} className="p-2.5 md:p-4 border-t border-orange-200 bg-white flex gap-2">
-                <input 
-                  type="text" 
-                  value={newMessage} 
+                <input
+                  type="text"
+                  value={newMessage}
                   maxLength={MAX_MSG_LENGTH}
-                  onChange={(e) => setNewMessage(e.target.value)} 
-                  placeholder="Escribe un mensaje..." 
-                  className="flex-1 px-3 py-2 text-xs md:text-sm border border-orange-300 rounded focus:ring-2 focus:ring-orange-400 outline-none" 
+                  onChange={(e) => setNewMessage(e.target.value)}
+                  placeholder="Escribe un mensaje..."
+                  className="flex-1 px-3 py-2 text-xs md:text-sm border border-orange-300 rounded focus:ring-2 focus:ring-orange-400 outline-none"
                 />
-                <button 
-                  type="submit" 
+                <button
+                  type="submit"
                   disabled={isSending}
                   className="px-4 py-2 bg-orange-500 text-white rounded font-bold hover:bg-orange-600 text-sm disabled:opacity-50"
                 >
