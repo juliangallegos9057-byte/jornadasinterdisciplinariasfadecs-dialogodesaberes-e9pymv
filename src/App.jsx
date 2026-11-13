@@ -24,7 +24,7 @@ const DRIVE_REPO_URL = "https://drive.google.com/drive/folders/1E-9JMFs1ot4Y1Omp
 const MAX_MSG_LENGTH = 1000;
 const NEWS_CACHE_TTL_MS = 5 * 60 * 1000;
 
-// Normalizador de texto (quita tildes y pasa a minúsculas para comparar)
+// Normalizador de texto: minúsculas y sin tildes
 const normalizeText = (str) => {
   if (!str) return '';
   return str
@@ -33,7 +33,7 @@ const normalizeText = (str) => {
     .replace(/[\u0300-\u036f]/g, '');
 };
 
-// Hash determinista para evitar noticias duplicadas
+// Generador de hash determinista para evitar noticias duplicadas
 const createDeterministicHash = (input) => {
   const clean = normalizeText(input);
   let hash = 0x811c9dc5;
@@ -41,7 +41,7 @@ const createDeterministicHash = (input) => {
     hash ^= clean.charCodeAt(i);
     hash = Math.imul(hash, 0x01000193);
   }
-  return 'argon-' + (hash >>> 0).toString(16);
+  return 'id-' + (hash >>> 0).toString(16);
 };
 
 // Limpiador de HTML en descripciones RSS
@@ -71,27 +71,37 @@ const isValidGoogleUrl = (urlString) => {
   }
 };
 
-// Sanitizador de enlaces externos de noticias
-const sanitizeHttpUrl = (urlString) => {
+// Sanitizador y validador de enlaces externos (evita enlaces rotos o protocolos inseguros)
+const sanitizeHttpUrl = (urlString, fallbackUrl = 'https://www.rionegro.com.ar/') => {
+  if (!urlString || typeof urlString !== 'string') return fallbackUrl;
+  const trimmed = urlString.trim();
+  if (trimmed === '#' || trimmed === '') return fallbackUrl;
   try {
-    const parsed = new URL(urlString);
-    return parsed.protocol === 'http:' || parsed.protocol === 'https:' ? urlString : '#';
+    const parsed = new URL(trimmed);
+    if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
+      return fallbackUrl;
+    }
+    if (parsed.hostname.includes('localhost') || parsed.hostname.includes('127.0.0.1')) {
+      return fallbackUrl;
+    }
+    return trimmed;
   } catch {
-    return '#';
+    return fallbackUrl;
   }
 };
 
-// Palabras prohibidas globales (bloquea accidentes, caídas a ríos/arroyos, policiales, deportes)
+// Palabras prohibidas globales (sin tildes, comparadas sobre texto normalizado)
 const globalExclusions = [
   'accidente', 'choque', 'volco', 'vuelco', 'muerto', 'fallecio', 'fallecido', 'fatal',
   'policial', 'detenido', 'robo', 'asaltaron', 'crimen', 'homicidio', 'autopsia',
   'clima', 'pronostico', 'meteorologico', 'futbol', 'torneo', 'partido', 'colapinto',
   'papa francisco', 'vaticano', 'espectaculo', 'famosos', 'farandula', 'horoscopo',
   'arroyo', 'cayo al', 'cruzar el', 'cruzaba', 'rescate', 'rescataron', 'bomberos',
-  'ahogado', 'desaparecido', 'buscan a', 'ambulancia', 'heridos', 'hospitalizaron'
+  'ahogado', 'desaparecido', 'buscan a', 'ambulancia', 'heridos', 'hospitalizaron',
+  '404', 'not found', 'pagina no encontrada'
 ];
 
-// Validador metodológico estricto por eje
+// Validador metodológico estricto por intersección conceptual
 const passesStrictFilter = (title, snippet, category) => {
   const normText = normalizeText(`${title} ${snippet}`);
 
@@ -103,12 +113,12 @@ const passesStrictFilter = (title, snippet, category) => {
     const coreResource = [
       'extractiv', 'mineria', 'minero', 'minera', 'fracking', 'hidrocarburo',
       'petroleo', 'petrolera', 'litio', 'uranio', 'oleoducto', 'vaca muerta',
-      'golfo san matias', 'megamineria', 'calcatreu', 'gnl'
+      'golfo san matias', 'megamineria', 'calcatreu', 'represa'
     ];
     const socialImpact = [
       'agua', 'comunidad', 'ambiental', 'socioambiental', 'contaminacion', 'derrame',
       'territorio', 'audiencia', 'asamblea', 'vecinos', 'rechazo', 'impacto',
-      'explotacion', 'pasivo', 'recurso', 'inversion', 'aprobacion', 'proyecto', 'sismo'
+      'explotacion', 'pasivo', 'recurso', 'inversion', 'aprobacion', 'proyecto'
     ];
     return coreResource.some(w => normText.includes(w)) && socialImpact.some(w => normText.includes(w));
   }
@@ -126,13 +136,13 @@ const passesStrictFilter = (title, snippet, category) => {
     const laborTerms = [
       'reforma laboral', 'precarizacion', 'despido', 'sindicato', 'gremio',
       'trabajador', 'paritaria', 'huelga', 'convenio colectivo', 'ajuste',
-      'flexibilizacion', 'empleo', 'salario', 'estabilidad laboral', 'ate', 'unter', 'adunc', 'juicios laborales'
+      'flexibilizacion', 'empleo', 'salario', 'estabilidad', 'ate', 'unter', 'adunc'
     ];
     return laborTerms.some(w => normText.includes(w));
   }
 
   if (category === 'Políticas de Inversión (RIGI / Súper RIGI)') {
-    const rigiTerms = ['rigi', 'super rigi', 'regimen de incentivo', 'grandes inversiones', 'exencion impositiva', 'vaca muerta'];
+    const rigiTerms = ['rigi', 'super rigi', 'regimen de incentivo', 'grandes inversiones', 'exencion impositiva', 'inversion extractiva'];
     return rigiTerms.some(w => normText.includes(w));
   }
 
@@ -153,148 +163,106 @@ const passesStrictFilter = (title, snippet, category) => {
   return true;
 };
 
-// Artículos reales verificados con enlaces directos (Deep Links) a la noticia exacta, nunca a la portada general
+// Noticias base con portales activos (sin enlaces profundos propensos a 404)
 const fallbackNews = [
   {
-    id: 'real-extract-1',
+    id: 'base-extract-1',
     tag: 'Extractivismo y Minería',
-    title: 'Río Negro: Hoy una audiencia contra los proyectos extractivistas y en defensa del Golfo San Matías',
-    date: '12 Nov 2026',
+    title: 'Proyectos extractivos aprobados, disputa por el acceso al agua y la otra cara de las inversiones en la Norpatagonia',
+    date: 'Nov 2026',
     source: 'Agencia Farco',
-    url: 'https://agencia.farco.org.ar/2026/11/12/rio-negro-hoy-una-audiencia-contra-los-proyectos-extractivistas-y-en-defensa-del-golfo-san-matias/',
-    snippet: 'Asambleas socioambientales y comunidades locales exponen las problemáticas por el uso del agua, el impacto ambiental y la otra cara de los proyectos extractivos.'
+    url: 'https://agencia.farco.org.ar/',
+    snippet: 'Problemáticas sociales que trae el extractivismo y la minería: proyectos aprobados en la zona, conflictos de comunidades por el acceso al agua frente a empresas explotadoras y el costo social oculto.'
   },
   {
-    id: 'real-extract-2',
+    id: 'base-extract-2',
     tag: 'Extractivismo y Minería',
-    title: 'Minería en Río Negro: cómo es el proyecto Calcatreu y el debate por el uso del agua en la Región Sur',
-    date: 'Actualidad',
+    title: 'Audiencias públicas y defensa de los bienes comunes en Río Negro y Neuquén',
+    date: 'Nov 2026',
     source: 'Diario Río Negro',
-    url: 'https://www.rionegro.com.ar/buscar/?q=Calcatreu+mineria+agua+comunidades',
-    snippet: 'Cuestionamientos de comunidades y organizaciones frente al avance de proyectos mineros aprobados y la disputa por los recursos hídricos.'
+    url: 'https://www.rionegro.com.ar/',
+    snippet: 'Debate sobre el impacto ambiental de las actividades económicas de la zona y las tensiones territoriales frente a nuevos emprendimientos.'
   },
   {
-    id: 'real-rigi-1',
-    tag: 'Políticas de Inversión (RIGI / Súper RIGI)',
-    title: 'Neuquén y Río Negro capturan el 56% del RIGI con Vaca Muerta',
-    date: '9 Nov 2026',
-    source: 'VacaMuerta.ar',
-    url: 'https://vacamuerta.ar/neuquen-y-rio-negro-capturan-el-56-del-rigi-con-vaca-muerta/',
-    snippet: 'Ambas provincias patagónicas concentran los proyectos aprobados bajo el Régimen de Incentivo para Grandes Inversiones (RIGI) y las tensiones fiscales derivadas.'
-  },
-  {
-    id: 'real-laboral-1',
-    tag: 'Configuraciones y Reformas Laborales',
-    title: 'Juicios laborales en Río Negro: aumentaron las causas tras la reforma y hubo un salto en los acuerdos de conciliación',
-    date: '19 Oct 2026',
-    source: 'Diario Río Negro',
-    url: 'https://www.rionegro.com.ar/politica/juicios-laborales-en-rio-negro-aumentaron-las-causas-y-hubo-un-salto-en-los-acuerdos-de-conciliacion/',
-    snippet: 'La Justicia laboral registró más ingresos de causas coincidiendo con la vigencia de la reforma laboral y la reconfiguración de la estabilidad de los trabajadores.'
-  },
-  {
-    id: 'real-desig-1',
+    id: 'base-desig-1',
     tag: 'Desigualdades Socio-Territoriales',
-    title: 'Índice de pobreza e indigencia: qué pasó en Neuquén, Río Negro y la Patagonia en el primer semestre del 2026',
-    date: '24 Sep 2026',
-    source: 'Diario Río Negro',
-    url: 'https://www.rionegro.com.ar/economia/indice-de-pobreza-e-indigencia-que-paso-en-neuquen-rio-negro-y-la-patagonia-en-el-primer-semestre-del-2026-4735560/',
-    snippet: 'Los datos oficiales reflejan la desigualdad socio-territorial entre las promesas de derrame por inversiones y las condiciones de vida de las familias trabajadoras.'
-  },
-  {
-    id: 'real-genero-1',
-    tag: 'Perspectiva de Género',
-    title: 'Cobertura especial sobre Pueblos Originarios, Género y Derechos Humanos en el territorio',
-    date: 'Actualidad',
-    source: 'elDiarioAR',
-    url: 'https://www.eldiarioar.com/temas/violencia-de-genero/',
-    snippet: 'Artículos específicos sobre desigualdades de género, tareas de cuidado, agendas feministas y acceso a derechos.'
-  },
-  {
-    id: 'real-unco-1',
-    tag: 'UNCo (Fiske Menuco / Neuquén)',
-    title: 'Noticias específicas de la Universidad Nacional del Comahue (FADECS General Roca / Fiske Menuco y Neuquén)',
-    date: 'Actualidad',
+    title: 'Brecha socio-territorial y acceso al trabajo frente a las promesas de inversión regional',
+    date: 'Nov 2026',
     source: 'ANRoca',
-    url: 'https://www.anroca.com.ar/noticias/buscar/?q=UNCo+FADECS',
-    snippet: 'Seguimiento directo de las actividades académicas, debates interdisciplinarios y situación presupuestaria en la sede General Roca (Fiske Menuco) y Neuquén.'
+    url: 'https://www.anroca.com.ar/',
+    snippet: 'Diferencia entre el acceso real al empleo y al hábitat para las familias trabajadoras frente al discurso de derrame de las grandes inversiones.'
+  },
+  {
+    id: 'base-laboral-1',
+    tag: 'Configuraciones y Reformas Laborales',
+    title: 'Reformas laborales y seguridad en el empleo: condiciones para la reproducción de la vida',
+    date: 'Nov 2026',
+    source: 'Diario Río Negro',
+    url: 'https://www.rionegro.com.ar/',
+    snippet: 'Cómo impactan las nuevas configuraciones laborales en los trabajadores de la zona, su estabilidad y la posibilidad de sostener su reproducción social.'
+  },
+  {
+    id: 'base-rigi-1',
+    tag: 'Políticas de Inversión (RIGI / Súper RIGI)',
+    title: 'RIGI y Súper RIGI: tensiones por los incentivos a las inversiones y la desigualdad laboral',
+    date: 'Nov 2026',
+    source: 'VacaMuerta.ar',
+    url: 'https://vacamuerta.ar/',
+    snippet: 'Sub-eje sobre las políticas de incentivo a las inversiones y el abismo de desigualdad que generan en el acceso al trabajo local.'
+  },
+  {
+    id: 'base-genero-1',
+    tag: 'Perspectiva de Género',
+    title: 'Perspectiva de género, cuidados y organización comunitaria en la región',
+    date: 'Nov 2026',
+    source: 'elDiarioAR',
+    url: 'https://www.eldiarioar.com/temas/pueblos-originarios/',
+    snippet: 'Abordaje crítico de las desigualdades de género, tareas de cuidado y luchas colectivas en el territorio.'
+  },
+  {
+    id: 'base-unco-1',
+    tag: 'UNCo (Fiske Menuco / Neuquén)',
+    title: 'Novedades y producción académica en la UNCo (Fiske Menuco / General Roca y Neuquén)',
+    date: 'Nov 2026',
+    source: 'UNCo',
+    url: 'https://www.uncoma.edu.ar/',
+    snippet: 'Espacio de articulación entre teoría y práctica, participación horizontal y vinculación de la universidad pública con el territorio.'
   }
 ];
 
-// Consultas RSS de Google News que devuelven el título exacto del diario y el enlace directo a la noticia
+// Consultas RSS optimizadas
 const thematicFeeds = [
   {
     tag: 'Extractivismo y Minería',
+    fallbackUrl: 'https://agencia.farco.org.ar/',
     rss: 'https://news.google.com/rss/search?q=(extractivismo+OR+megamineria+OR+fracking+OR+"Golfo+San+Matias"+OR+Calcatreu)+(agua+OR+ambiental+OR+comunidades+OR+contaminacion)+("Rio+Negro"+OR+Neuquen)+-accidente+-choque+-policial&hl=es-419&gl=AR&ceid=AR:es-419'
   },
   {
     tag: 'Desigualdades Socio-Territoriales',
+    fallbackUrl: 'https://www.anroca.com.ar/',
     rss: 'https://news.google.com/rss/search?q=(desigualdad+OR+pobreza+OR+"crisis+habitacional"+OR+alquileres+OR+"barrios+populares")+("Rio+Negro"+OR+Neuquen)+-accidente+-choque+-policial&hl=es-419&gl=AR&ceid=AR:es-419'
   },
   {
     tag: 'Configuraciones y Reformas Laborales',
+    fallbackUrl: 'https://www.rionegro.com.ar/',
     rss: 'https://news.google.com/rss/search?q=("reforma+laboral"+OR+precarizacion+OR+despidos+OR+paritarias+OR+sindicatos)+("Rio+Negro"+OR+Neuquen)+-accidente+-choque+-policial&hl=es-419&gl=AR&ceid=AR:es-419'
   },
   {
     tag: 'Políticas de Inversión (RIGI / Súper RIGI)',
+    fallbackUrl: 'https://vacamuerta.ar/',
     rss: 'https://news.google.com/rss/search?q=(RIGI+OR+"Super+RIGI")+(inversiones+OR+"Vaca+Muerta"+OR+mineria)+("Rio+Negro"+OR+Neuquen)+-accidente+-futbol&hl=es-419&gl=AR&ceid=AR:es-419'
   },
   {
     tag: 'Perspectiva de Género',
+    fallbackUrl: 'https://www.eldiarioar.com/',
     rss: 'https://news.google.com/rss/search?q=("perspectiva+de+genero"+OR+"violencia+de+genero"+OR+feminismo+OR+disidencias+OR+"tareas+de+cuidado")+("Rio+Negro"+OR+Neuquen)+-accidente+-choque+-vial+-papa&hl=es-419&gl=AR&ceid=AR:es-419'
   },
   {
     tag: 'UNCo (Fiske Menuco / Neuquén)',
+    fallbackUrl: 'https://www.uncoma.edu.ar/',
     rss: 'https://news.google.com/rss/search?q=("Universidad+Nacional+del+Comahue"+OR+UNCo+OR+FADECS)+("General+Roca"+OR+"Fiske+Menuco"+OR+Neuquen)+-accidente+-choque+-futbol&hl=es-419&gl=AR&ceid=AR:es-419'
   }
 ];
-
-// Extractor de noticias con doble respaldo (rss2json + Lector XML nativo vía AllOrigins si rss2json falla)
-const fetchFeedItems = async (rssUrl) => {
-  // Intento 1: rss2json
-  try {
-    const apiUrl = `https://api.rss2json.com/v1/api.json?rss_url=${encodeURIComponent(rssUrl)}`;
-    const res = await fetch(apiUrl);
-    if (res.ok) {
-      const data = await res.json();
-      if (data.status === 'ok' && Array.isArray(data.items) && data.items.length > 0) {
-        return data.items.map(item => ({
-          rawTitle: item.title || '',
-          link: item.link || '',
-          pubDate: item.pubDate || '',
-          description: item.description || '',
-          author: item.author || ''
-        }));
-      }
-    }
-  } catch {
-    // Pasar silenciosamente al intento 2
-  }
-
-  // Intento 2: Lector XML directo vía AllOrigins Proxy (evita bloqueos de límite de API)
-  try {
-    const proxyUrl = `https://api.allorigins.win/get?url=${encodeURIComponent(rssUrl)}`;
-    const res = await fetch(proxyUrl);
-    if (res.ok) {
-      const data = await res.json();
-      if (data.contents) {
-        const parser = new DOMParser();
-        const xml = parser.parseFromString(data.contents, 'text/xml');
-        const items = Array.from(xml.querySelectorAll('item'));
-        return items.map(el => ({
-          rawTitle: el.querySelector('title')?.textContent || '',
-          link: el.querySelector('link')?.textContent || '',
-          pubDate: el.querySelector('pubDate')?.textContent || '',
-          description: el.querySelector('description')?.textContent || '',
-          author: el.querySelector('source')?.textContent || ''
-        }));
-      }
-    }
-  } catch {
-    // Retornar vacío si ambos fallan
-  }
-
-  return [];
-};
 
 const FadecsWorkspace = () => {
   const [user, setUser] = useState(null);
@@ -361,7 +329,7 @@ const FadecsWorkspace = () => {
     }
   };
 
-  // 4. Búsqueda automática con titulares exactos del diario y enlaces directos al artículo
+  // 4. Búsqueda automática con filtro metodológico, deduplicación y caché
   const fetchLiveNews = async (forceRefresh = false) => {
     const now = Date.now();
     if (!forceRefresh && now - lastFetchTimeRef.current < NEWS_CACHE_TTL_MS) {
@@ -371,28 +339,31 @@ const FadecsWorkspace = () => {
     setLoadingNews(true);
     try {
       const promises = thematicFeeds.map(async (feed) => {
-        const rawItems = await fetchFeedItems(feed.rss);
+        const apiUrl = `https://api.rss2json.com/v1/api.json?rss_url=${encodeURIComponent(feed.rss)}`;
+        const res = await fetch(apiUrl);
+        if (!res.ok) return [];
+        const data = await res.json();
+        if (!data.items || !Array.isArray(data.items)) return [];
 
-        return rawItems
+        return data.items
           .map((item) => {
-            // Google News formatea "<Título exacto de la nota> - <Nombre del Diario>"
-            const lastDashIndex = item.rawTitle.lastIndexOf(' - ');
-            const exactHeadline = lastDashIndex !== -1 ? item.rawTitle.slice(0, lastDashIndex).trim() : item.rawTitle.trim();
-            const exactNewspaper = lastDashIndex !== -1 ? item.rawTitle.slice(lastDashIndex + 3).trim() : (item.author || 'Diario Regional');
-            const cleanDesc = stripHtml(item.description);
+            const titleParts = (item.title || '').split(' - ');
+            const cleanTitle = titleParts.length > 1 ? titleParts.slice(0, -1).join(' - ').trim() : (item.title || '').trim();
+            const sourceName = titleParts.length > 1 ? titleParts[titleParts.length - 1].trim() : (item.author || 'Medio Regional');
+            const cleanDesc = stripHtml(item.description || '');
 
             return {
-              id: createDeterministicHash(`${feed.tag}-${exactHeadline}`),
+              id: createDeterministicHash(`${feed.tag}-${cleanTitle}`),
               tag: feed.tag,
-              title: exactHeadline,
+              title: cleanTitle,
               date: item.pubDate ? new Date(item.pubDate).toLocaleDateString('es-AR', { day: 'numeric', month: 'short', year: 'numeric' }) : 'Actualidad',
-              source: exactNewspaper,
-              url: sanitizeHttpUrl(item.link),
-              snippet: cleanDesc && cleanDesc !== item.rawTitle ? cleanDesc.slice(0, 165) + '...' : `Hacé clic en "Ir a la nota en ${exactNewspaper}" para leer el artículo periodístico completo.`
+              source: sourceName,
+              url: sanitizeHttpUrl(item.link, feed.fallbackUrl),
+              snippet: cleanDesc.length > 25 ? cleanDesc.slice(0, 160) + '...' : `Artículo periodístico vinculado al eje ${feed.tag} en la región.`
             };
           })
-          .filter(article => article.url !== '#' && passesStrictFilter(article.title, article.snippet, feed.tag))
-          .slice(0, 4);
+          .filter(article => passesStrictFilter(article.title, article.snippet, feed.tag))
+          .slice(0, 3);
       });
 
       const results = await Promise.all(promises);
@@ -412,7 +383,7 @@ const FadecsWorkspace = () => {
       setNewsList(mergedList);
       lastFetchTimeRef.current = Date.now();
     } catch (err) {
-      console.error('Error al actualizar feeds temáticos:', err);
+      console.error('Error al actualizar feeds temáticos, manteniendo base metodológica:', err);
       setNewsList(fallbackNews);
     } finally {
       setLoadingNews(false);
@@ -547,7 +518,7 @@ const FadecsWorkspace = () => {
     return (
       <div className="flex h-screen bg-orange-50 items-center justify-center font-sans p-4">
         <div className="bg-white p-6 md:p-8 rounded-xl shadow-lg border border-orange-200 text-center max-w-md w-full">
-          <h1 className="text-2xl md:text-3xl font-bold text-orange-800 mb-2">JIFADECS 2027</h1>
+          <h1 className="text-2xl md:text-3xl font-bold text-orange-800 mb-2">JIFADECS 2026</h1>
           <p className="text-sm md:text-base text-orange-600 mb-8">Diálogo de saberes para los desafíos contemporáneos</p>
           <button onClick={login} className="w-full bg-orange-500 text-white font-bold py-3 px-4 rounded-lg hover:bg-orange-600 transition-colors shadow-md">
             Iniciar sesión con Google
@@ -564,7 +535,7 @@ const FadecsWorkspace = () => {
       {/* CABECERA MÓVIL */}
       <div className="md:hidden flex items-center justify-between p-3 bg-orange-200 border-b border-orange-300 shadow-sm z-20">
         <div>
-          <h1 className="text-lg font-bold text-orange-900 leading-tight">JIFADECS 2027</h1>
+          <h1 className="text-lg font-bold text-orange-900 leading-tight">JIFADECS 2026</h1>
           <p className="text-[11px] text-orange-700 truncate max-w-[200px]">{user.displayName}</p>
         </div>
         <button
@@ -578,7 +549,7 @@ const FadecsWorkspace = () => {
       {/* BARRA LATERAL */}
       <div className={`${isMobileMenuOpen ? 'fixed inset-0 top-[57px] z-30 flex' : 'hidden'} md:relative md:top-0 md:flex w-full md:w-64 bg-orange-100 border-r border-orange-200 flex-col shadow-sm`}>
         <div className="hidden md:block p-4 border-b border-orange-200 bg-orange-200/50">
-          <h1 className="text-xl font-bold text-orange-800">JIFADECS 2027</h1>
+          <h1 className="text-xl font-bold text-orange-800">JIFADECS 2026</h1>
           <p className="text-xs text-orange-700 mt-1 truncate">{user.displayName}</p>
           <button onClick={logout} className="text-xs text-orange-500 hover:text-orange-800 mt-2 font-semibold">Cerrar sesión</button>
         </div>
@@ -631,7 +602,7 @@ const FadecsWorkspace = () => {
             <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-4">
               <div>
                 <h2 className="text-2xl md:text-3xl font-bold text-orange-800">Actualidad Regional y Ejes Metodológicos</h2>
-                <p className="text-xs md:text-sm text-orange-600 mt-1">Titulares exactos y enlaces directos a las notas en los portales regionales (Río Negro y Neuquén).</p>
+                <p className="text-xs md:text-sm text-orange-600 mt-1">Análisis territorial crítico, extractivismo, agua, desigualdades, trabajo, género y UNCo (Fiske Menuco / Neuquén).</p>
               </div>
               <div className="flex flex-wrap gap-2">
                 <button
@@ -639,7 +610,7 @@ const FadecsWorkspace = () => {
                   disabled={loadingNews}
                   className="px-3 py-2 bg-orange-200 text-orange-900 rounded-lg font-semibold text-xs md:text-sm hover:bg-orange-300 transition-colors disabled:opacity-50"
                 >
-                  {loadingNews ? '🔄 Buscando artículos...' : '🔄 Actualizar titulares'}
+                  {loadingNews ? '🔄 Filtrando notas...' : '🔄 Actualizar titulares'}
                 </button>
                 <a
                   href="https://www.diariosargentinos.com.ar/web"
@@ -671,20 +642,12 @@ const FadecsWorkspace = () => {
                   <div>
                     <div className="flex items-center justify-between gap-2 mb-2">
                       <span className="inline-block px-2.5 py-0.5 bg-orange-100 text-orange-800 text-[11px] font-bold rounded-full">{news.tag}</span>
-                      <span className="text-[11px] text-orange-600 font-semibold text-right">{news.date} • {news.source}</span>
+                      <span className="text-[11px] text-orange-500 font-medium text-right">{news.date} • {news.source}</span>
                     </div>
                     <h3 className="text-base md:text-lg font-bold text-orange-900 mb-2 leading-snug">{news.title}</h3>
                     <p className="text-orange-700 text-xs md:text-sm mb-4 line-clamp-3">{news.snippet}</p>
                   </div>
-                  <a
-                    href={sanitizeHttpUrl(news.url)}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="text-orange-600 font-bold text-xs md:text-sm hover:text-orange-800 self-start flex items-center gap-1"
-                  >
-                    <span>Ir a la nota en {news.source}</span>
-                    <span>→</span>
-                  </a>
+                  <a href={sanitizeHttpUrl(news.url)} target="_blank" rel="noopener noreferrer" className="text-orange-600 font-bold text-xs md:text-sm hover:text-orange-800 self-start">Leer artículo completo →</a>
                 </div>
               ))}
             </div>
@@ -714,48 +677,44 @@ const FadecsWorkspace = () => {
             {currentView.startsWith('sala-') && (
               <div className={`${mobileRoomTab === 'doc' ? 'flex' : 'hidden'} md:flex flex-1 flex-col border-r border-orange-200 bg-white h-full overflow-hidden`}>
                 <div className="p-3 md:p-4 bg-orange-100/30 border-b border-orange-200">
-                  <div className="bg-yellow-50 border-l-4 border-yellow-400 p-2 mb-2.5">
+                  <div className="bg-yellow-50 border-l-4 border-yellow-400 p-2 mb-2.5 flex flex-col sm:flex-row sm:items-center justify-between gap-2">
                     <p className="text-xs text-yellow-800">
                       ⚠️ <strong>Importante:</strong> Compartir este documento solo con los integrantes del grupo y coordinación.
                     </p>
+                    {activeDocUrl && isValidGoogleUrl(activeDocUrl) && (
+                      <a
+                        href={sanitizeHttpUrl(activeDocUrl)}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="px-3 py-1 bg-orange-600 text-white rounded font-bold text-xs hover:bg-orange-700 shadow-sm whitespace-nowrap self-start sm:self-auto"
+                      >
+                        📄 Abrir en pestaña de Google Docs ↗
+                      </a>
+                    )}
                   </div>
                   <form onSubmit={handleDocSubmit} className="flex gap-2">
                     <input
                       type="url"
                       value={docInput}
                       onChange={(e) => setDocInput(e.target.value)}
-                      placeholder="Actualizar enlace de Google Docs..."
+                      placeholder="Pega el enlace de Google Docs (https://docs.google.com/...)"
                       className="flex-1 px-3 py-1.5 md:py-2 border border-orange-300 rounded text-xs md:text-sm focus:ring-2 focus:ring-orange-400 outline-none"
                     />
-                    <button type="submit" className="px-3 md:px-4 py-1.5 md:py-2 bg-orange-500 text-white rounded font-semibold text-xs md:text-sm hover:bg-orange-600 whitespace-nowrap">Guardar link</button>
+                    <button type="submit" className="px-3 md:px-4 py-1.5 md:py-2 bg-orange-500 text-white rounded font-semibold text-xs md:text-sm hover:bg-orange-600 whitespace-nowrap">Incrustar</button>
                   </form>
                   {docError && <p className="text-xs text-red-600 mt-1.5 font-semibold">{docError}</p>}
                 </div>
 
-                <div className="flex-1 bg-orange-50/40 p-6 flex flex-col items-center justify-center text-center">
+                <div className="flex-1 bg-gray-50 p-1 md:p-2 overflow-hidden">
                   {activeDocUrl && isValidGoogleUrl(activeDocUrl) ? (
-                    <div className="bg-white p-8 rounded-xl shadow-md border border-orange-200 max-w-md w-full flex flex-col items-center">
-                      <div className="w-16 h-16 bg-orange-100 text-orange-600 rounded-full flex items-center justify-center text-2xl mb-4 shadow-inner">
-                        📄
-                      </div>
-                      <h3 className="text-lg font-bold text-orange-900 mb-2">Documento de la Sala Activo</h3>
-                      <p className="text-xs text-orange-600 mb-6">
-                        Haz clic en el botón de abajo para abrir el documento colaborativo en una pestaña nueva y editarlo con tu cuenta.
-                      </p>
-                      <a
-                        href={sanitizeHttpUrl(activeDocUrl)}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="w-full py-3 px-4 bg-orange-500 text-white rounded-lg font-bold text-sm shadow hover:bg-orange-600 transition-all flex items-center justify-center gap-2"
-                      >
-                        <span>Abrir documento y editar en Google Docs</span>
-                        <span className="text-base">↗</span>
-                      </a>
-                    </div>
+                    <iframe
+                      src={activeDocUrl}
+                      className="w-full h-full border-0 rounded shadow-inner"
+                      title="Documento Colaborativo"
+                    />
                   ) : (
-                    <div className="text-orange-400 text-sm max-w-xs">
-                      <p className="font-semibold mb-1">Sin documento asignado</p>
-                      <p className="text-xs opacity-80">Pega el enlace oficial de Google Docs en el cuadro superior para que todo el grupo pueda acceder.</p>
+                    <div className="h-full flex items-center justify-center text-orange-400 text-xs md:text-sm p-4 text-center">
+                      No hay un documento activo en esta sala. Pega el enlace arriba para incrustarlo.
                     </div>
                   )}
                 </div>
