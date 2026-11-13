@@ -21,6 +21,31 @@ const provider = new GoogleAuthProvider();
 
 // Enlace al Repositorio Bibliográfico de Google Drive
 const DRIVE_REPO_URL = "https://drive.google.com/drive/folders/1E-9JMFs1ot4Y1Omp_OJSbcl3Ilu_PfH3";
+const MAX_MSG_LENGTH = 1000;
+
+// Validador de seguridad para URLs de Google Docs / Drive
+const isValidGoogleUrl = (urlString) => {
+  if (!urlString) return false;
+  try {
+    const parsed = new URL(urlString);
+    return (
+      parsed.protocol === 'https:' &&
+      (parsed.hostname === 'docs.google.com' || parsed.hostname === 'drive.google.com')
+    );
+  } catch {
+    return false;
+  }
+};
+
+// Sanitizador de enlaces externos de noticias (previene XSS por javascript:)
+const sanitizeHttpUrl = (urlString) => {
+  try {
+    const parsed = new URL(urlString);
+    return parsed.protocol === 'http:' || parsed.protocol === 'https:' ? urlString : '#';
+  } catch {
+    return '#';
+  }
+};
 
 // Noticias base curadas sobre los 5 ejes de las Jornadas
 const fallbackNews = [
@@ -60,8 +85,10 @@ const FadecsWorkspace = () => {
   const [roomsCount, setRoomsCount] = useState(3);
   const [activeDocUrl, setActiveDocUrl] = useState('');
   const [docInput, setDocInput] = useState('');
+  const [docError, setDocError] = useState('');
   const [messages, setMessages] = useState([]);
   const [newMessage, setNewMessage] = useState('');
+  const [isSending, setIsSending] = useState(false);
   
   const [editingMsgId, setEditingMsgId] = useState(null);
   const [editingText, setEditingText] = useState('');
@@ -91,7 +118,8 @@ const FadecsWorkspace = () => {
     if (!user) return;
     const unsub = onSnapshot(doc(db, 'config', 'general'), (docSnap) => {
       if (docSnap.exists()) {
-        setRoomsCount(docSnap.data().roomsCount || 1);
+        const count = Number(docSnap.data().roomsCount) || 1;
+        setRoomsCount(Math.min(Math.max(1, count), 30)); // Tope de seguridad de 30 salas
       }
     });
     return () => unsub();
@@ -99,8 +127,9 @@ const FadecsWorkspace = () => {
 
   const updateRoomsCount = async (newCount) => {
     if (!isAdmin) return;
-    setRoomsCount(newCount);
-    await setDoc(doc(db, 'config', 'general'), { roomsCount: newCount }, { merge: true });
+    const boundedCount = Math.min(Math.max(1, newCount), 30);
+    setRoomsCount(boundedCount);
+    await setDoc(doc(db, 'config', 'general'), { roomsCount: boundedCount }, { merge: true });
   };
 
   // 4. Búsqueda automática filtrada por los 5 ejes temáticos
@@ -123,7 +152,7 @@ const FadecsWorkspace = () => {
               title: cleanTitle,
               date: new Date(item.pubDate).toLocaleDateString('es-AR', { day: 'numeric', month: 'short', year: 'numeric' }),
               source: sourceName,
-              url: item.link,
+              url: sanitizeHttpUrl(item.link),
               snippet: `Nota periodística vinculada al eje de ${feed.tag} en la región patagónica.`
             };
           });
@@ -152,6 +181,7 @@ const FadecsWorkspace = () => {
   // 5. Sincronización de Chat y Documentos por Sala
   useEffect(() => {
     if (!user || currentView === 'noticias') return;
+    setDocError('');
 
     const q = query(collection(db, 'salas', currentView, 'mensajes'), orderBy('createdAt', 'asc'));
     const unsubChat = onSnapshot(q, (snapshot) => {
@@ -163,7 +193,8 @@ const FadecsWorkspace = () => {
     if (currentView.startsWith('sala-')) {
       unsubDoc = onSnapshot(doc(db, 'salas', currentView), (docSnap) => {
         if (docSnap.exists()) {
-          setActiveDocUrl(docSnap.data().docUrl || '');
+          const storedUrl = docSnap.data().docUrl || '';
+          setActiveDocUrl(isValidGoogleUrl(storedUrl) ? storedUrl : '');
         } else {
           setActiveDocUrl('');
         }
@@ -173,18 +204,26 @@ const FadecsWorkspace = () => {
     return () => { unsubChat(); unsubDoc(); };
   }, [currentView, user]);
 
-  // 6. Enviar, Editar y Borrar Mensajes
+  // 6. Enviar, Editar y Borrar Mensajes con validaciones de seguridad
   const sendMessage = async (e) => {
     e.preventDefault();
-    if (!newMessage.trim()) return;
-    const msgText = newMessage;
+    const trimmed = newMessage.trim();
+    if (!trimmed || trimmed.length > MAX_MSG_LENGTH || isSending) return;
+
+    setIsSending(true);
     setNewMessage('');
-    await addDoc(collection(db, 'salas', currentView, 'mensajes'), {
-      text: msgText,
-      sender: user.displayName,
-      email: user.email,
-      createdAt: serverTimestamp()
-    });
+    try {
+      await addDoc(collection(db, 'salas', currentView, 'mensajes'), {
+        text: trimmed,
+        sender: user.displayName || 'Participante',
+        email: user.email,
+        createdAt: serverTimestamp()
+      });
+    } catch (err) {
+      console.error('Error al enviar mensaje:', err);
+      setNewMessage(trimmed);
+    }
+    setIsSending(false);
   };
 
   const handleDeleteMessage = async (msgId) => {
@@ -199,9 +238,10 @@ const FadecsWorkspace = () => {
   };
 
   const saveEditMessage = async (msgId) => {
-    if (!editingText.trim()) return;
+    const trimmed = editingText.trim();
+    if (!trimmed || trimmed.length > MAX_MSG_LENGTH) return;
     await updateDoc(doc(db, 'salas', currentView, 'mensajes', msgId), {
-      text: editingText,
+      text: trimmed,
       edited: true
     });
     setEditingMsgId(null);
@@ -210,15 +250,24 @@ const FadecsWorkspace = () => {
 
   const handleDocSubmit = async (e) => {
     e.preventDefault();
-    setActiveDocUrl(docInput);
+    const trimmedUrl = docInput.trim();
+    
+    if (!isValidGoogleUrl(trimmedUrl)) {
+      setDocError('Por seguridad, solo se permiten enlaces oficiales de Google Docs o Google Drive (https://docs.google.com/...).');
+      return;
+    }
+
+    setDocError('');
+    setActiveDocUrl(trimmedUrl);
     setDocInput('');
-    await setDoc(doc(db, 'salas', currentView), { docUrl: docInput }, { merge: true });
+    await setDoc(doc(db, 'salas', currentView), { docUrl: trimmedUrl }, { merge: true });
   };
 
   const selectView = (view) => {
     setCurrentView(view);
     setIsMobileMenuOpen(false);
     setEditingMsgId(null);
+    setDocError('');
   };
 
   const categories = ['Todas', 'Ambiente y Extractivismo', 'Comunidades Originarias', 'Políticas de Inversión (RIGI)', 'Reconfiguración Laboral', 'Desigualdad Socio-territorial'];
@@ -286,7 +335,7 @@ const FadecsWorkspace = () => {
               <h2 className="text-xs font-semibold text-orange-500 uppercase tracking-wider">Grupos de Trabajo</h2>
               {isAdmin && (
                 <div className="flex space-x-1">
-                  <button onClick={() => updateRoomsCount(Math.max(1, roomsCount - 1))} className="px-2.5 py-0.5 bg-orange-300 text-orange-900 rounded hover:bg-orange-400 font-bold">-</button>
+                  <button onClick={() => updateRoomsCount(roomsCount - 1)} className="px-2.5 py-0.5 bg-orange-300 text-orange-900 rounded hover:bg-orange-400 font-bold">-</button>
                   <button onClick={() => updateRoomsCount(roomsCount + 1)} className="px-2.5 py-0.5 bg-orange-300 text-orange-900 rounded hover:bg-orange-400 font-bold">+</button>
                 </div>
               )}
@@ -322,7 +371,7 @@ const FadecsWorkspace = () => {
                 <a 
                   href="https://www.diariosargentinos.com.ar/web" 
                   target="_blank" 
-                  rel="noreferrer" 
+                  rel="noopener noreferrer" 
                   className="px-4 py-2 bg-orange-500 text-white rounded-lg font-bold text-xs md:text-sm hover:bg-orange-600 shadow transition-colors flex items-center gap-1"
                 >
                   🗞️ Kiosco Diarios Argentinos ↗
@@ -354,7 +403,7 @@ const FadecsWorkspace = () => {
                     <h3 className="text-base md:text-lg font-bold text-orange-900 mb-2 leading-snug">{news.title}</h3>
                     <p className="text-orange-700 text-xs md:text-sm mb-4 line-clamp-3">{news.snippet}</p>
                   </div>
-                  <a href={news.url} target="_blank" rel="noreferrer" className="text-orange-600 font-bold text-xs md:text-sm hover:text-orange-800 self-start">Leer artículo completo →</a>
+                  <a href={sanitizeHttpUrl(news.url)} target="_blank" rel="noopener noreferrer" className="text-orange-600 font-bold text-xs md:text-sm hover:text-orange-800 self-start">Leer artículo completo →</a>
                 </div>
               ))}
             </div>
@@ -390,13 +439,26 @@ const FadecsWorkspace = () => {
                     </p>
                   </div>
                   <form onSubmit={handleDocSubmit} className="flex gap-2">
-                    <input type="url" value={docInput} onChange={(e) => setDocInput(e.target.value)} placeholder="Pega el enlace de Google Docs..." className="flex-1 px-3 py-1.5 md:py-2 border border-orange-300 rounded text-xs md:text-sm focus:ring-2 focus:ring-orange-400 outline-none" />
+                    <input 
+                      type="url" 
+                      value={docInput} 
+                      onChange={(e) => setDocInput(e.target.value)} 
+                      placeholder="Pega el enlace de Google Docs (https://docs.google.com/...)" 
+                      className="flex-1 px-3 py-1.5 md:py-2 border border-orange-300 rounded text-xs md:text-sm focus:ring-2 focus:ring-orange-400 outline-none" 
+                    />
                     <button type="submit" className="px-3 md:px-4 py-1.5 md:py-2 bg-orange-500 text-white rounded font-semibold text-xs md:text-sm hover:bg-orange-600 whitespace-nowrap">Incrustar</button>
                   </form>
+                  {docError && <p className="text-xs text-red-600 mt-1.5 font-semibold">{docError}</p>}
                 </div>
                 <div className="flex-1 bg-gray-50 p-1 md:p-2 overflow-hidden">
-                  {activeDocUrl ? (
-                    <iframe src={activeDocUrl} className="w-full h-full border-0 rounded shadow-inner" title="Doc" />
+                  {activeDocUrl && isValidGoogleUrl(activeDocUrl) ? (
+                    <iframe 
+                      src={activeDocUrl} 
+                      className="w-full h-full border-0 rounded shadow-inner" 
+                      title="Documento Colaborativo"
+                      referrerPolicy="no-referrer"
+                      sandbox="allow-scripts allow-same-origin allow-forms allow-popups"
+                    />
                   ) : (
                     <div className="h-full flex items-center justify-center text-orange-400 text-xs md:text-sm p-4 text-center">No hay un documento activo en esta sala.</div>
                   )}
@@ -442,6 +504,7 @@ const FadecsWorkspace = () => {
                           <input 
                             type="text" 
                             value={editingText} 
+                            maxLength={MAX_MSG_LENGTH}
                             onChange={(e) => setEditingText(e.target.value)}
                             className="w-full px-2 py-1 text-xs text-orange-900 bg-white rounded border border-orange-300 outline-none"
                             autoFocus
@@ -461,8 +524,21 @@ const FadecsWorkspace = () => {
               </div>
 
               <form onSubmit={sendMessage} className="p-2.5 md:p-4 border-t border-orange-200 bg-white flex gap-2">
-                <input type="text" value={newMessage} onChange={(e) => setNewMessage(e.target.value)} placeholder="Escribe un mensaje..." className="flex-1 px-3 py-2 text-xs md:text-sm border border-orange-300 rounded focus:ring-2 focus:ring-orange-400 outline-none" />
-                <button type="submit" className="px-4 py-2 bg-orange-500 text-white rounded font-bold hover:bg-orange-600 text-sm">→</button>
+                <input 
+                  type="text" 
+                  value={newMessage} 
+                  maxLength={MAX_MSG_LENGTH}
+                  onChange={(e) => setNewMessage(e.target.value)} 
+                  placeholder="Escribe un mensaje..." 
+                  className="flex-1 px-3 py-2 text-xs md:text-sm border border-orange-300 rounded focus:ring-2 focus:ring-orange-400 outline-none" 
+                />
+                <button 
+                  type="submit" 
+                  disabled={isSending}
+                  className="px-4 py-2 bg-orange-500 text-white rounded font-bold hover:bg-orange-600 text-sm disabled:opacity-50"
+                >
+                  →
+                </button>
               </form>
             </div>
 
