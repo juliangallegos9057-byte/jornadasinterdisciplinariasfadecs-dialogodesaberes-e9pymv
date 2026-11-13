@@ -159,6 +159,48 @@ const passesStrictFilter = (title, snippet, category) => {
   return true;
 };
 
+// Portales regionales seleccionados de Neuquén y Río Negro (sin paréntesis ni corchetes)
+const regionalPortalsQuery = [
+  'site:eldiarioar.com',
+  'site:movimientoalternativa.com.ar',
+  'site:zapalaya.com.ar',
+  'site:fuego24.com',
+  'site:damenoticias.com',
+  'site:diarioandino.com.ar',
+  'site:elperiodicoderincon.com.ar',
+  'site:laangosturadigital.com.ar',
+  'site:diariamenteneuquen.com.ar',
+  'site:neuquenalinstante.com.ar',
+  'site:mejorinformado.com',
+  'site:elcomahueonline.com',
+  'site:neuquenonline.com.ar',
+  'site:neuquen24horas.com',
+  'site:alertadigital.ar',
+  'site:neuquendigitalnoticias.com.ar',
+  'site:neuquenweb.com',
+  'site:neuqueninforma.gob.ar',
+  'site:cutralcoalinstante.com',
+  'site:hechosdezapala.com',
+  'site:limaynoticias.com',
+  'site:vdmnoticias.com',
+  'site:riocoloradoinforma.com.ar',
+  'site:vivoinformado.com.ar',
+  'site:hoyvallemedio.ar',
+  'site:barilochedigital.com',
+  'site:cipollettidigital.com.ar',
+  'site:cipo360.com.ar',
+  'site:diariolapalabra.com.ar',
+  'site:estoquepasa.com.ar',
+  'site:loprincipal.com.ar',
+  'site:gnrnoticias.com',
+  'site:anroca.com.ar',
+  'site:elcordillerano.com.ar',
+  'site:adnrionegro.com.ar',
+  'site:rionegro.com.ar',
+  'site:canal10.com.ar',
+  'site:lmcipolleti.com.ar'
+].join(' OR ');
+
 // Noticias base metodológicas curadas
 const fallbackNews = [
   {
@@ -166,8 +208,8 @@ const fallbackNews = [
     tag: 'Extractivismo y Minería',
     title: 'Proyectos extractivos aprobados, disputa por el acceso al agua y la otra cara de las inversiones en la Norpatagonia',
     date: 'Nov 2026',
-    source: 'Agencia Farco',
-    url: 'https://agencia.farco.org.ar/',
+    source: 'elDiarioAR / Red Regional',
+    url: 'https://www.eldiarioar.com/temas/pueblos-originarios/',
     snippet: 'Problemáticas sociales que trae el extractivismo y la minería: proyectos aprobados en la zona, conflictos de comunidades por el acceso al agua frente a empresas explotadoras y el costo social oculto.'
   },
   {
@@ -202,8 +244,8 @@ const fallbackNews = [
     tag: 'Políticas de Inversión (RIGI / Súper RIGI)',
     title: 'RIGI y Súper RIGI: tensiones por los incentivos a las inversiones y la desigualdad laboral',
     date: 'Nov 2026',
-    source: 'VacaMuerta.ar',
-    url: 'https://vacamuerta.ar/',
+    source: 'Mejor Informado',
+    url: 'https://mejorinformado.com/',
     snippet: 'Sub-eje sobre las políticas de incentivo a las inversiones y el abismo de desigualdad que generan en el acceso al trabajo local.'
   },
   {
@@ -220,37 +262,37 @@ const fallbackNews = [
     tag: 'UNCo (Fiske Menuco / Neuquén)',
     title: 'Novedades y producción académica en la UNCo (Fiske Menuco / General Roca y Neuquén)',
     date: 'Nov 2026',
-    source: 'UNCo',
-    url: 'https://www.uncoma.edu.ar/',
+    source: 'Neuquén Informa / UNCo',
+    url: 'https://neuqueninforma.gob.ar/',
     snippet: 'Espacio de articulación entre teoría y práctica, participación horizontal y vinculación de la universidad pública con el territorio.'
   }
 ];
 
-// Consultas RSS optimizadas
+// Consultas RSS optimizadas con los portales de Neuquén y Río Negro (sin paréntesis ni corchetes)
 const thematicFeeds = [
   {
     tag: 'Extractivismo y Minería',
-    rss: 'https://news.google.com/rss/search?q=(extractivismo+OR+megamineria+OR+fracking+OR+"Golfo+San+Matias"+OR+Calcatreu)+(agua+OR+ambiental+OR+comunidades+OR+contaminacion)+("Rio+Negro"+OR+Neuquen)+-accidente+-choque+-policial&hl=es-419&gl=AR&ceid=AR:es-419'
+    rss: `https://news.google.com/rss/search?q=extractivismo OR mineria OR fracking OR agua OR ambiental OR comunidades ${regionalPortalsQuery} -accidente -choque -policial&hl=es-419&gl=AR&ceid=AR:es-419`
   },
   {
     tag: 'Desigualdades Socio-Territoriales',
-    rss: 'https://news.google.com/rss/search?q=(desigualdad+OR+pobreza+OR+"crisis+habitacional"+OR+alquileres+OR+"barrios+populares")+("Rio+Negro"+OR+Neuquen)+-accidente+-choque+-policial&hl=es-419&gl=AR&ceid=AR:es-419'
+    rss: `https://news.google.com/rss/search?q=desigualdad OR pobreza OR vivienda OR alquileres OR barrios OR territorial ${regionalPortalsQuery} -accidente -choque -policial&hl=es-419&gl=AR&ceid=AR:es-419`
   },
   {
     tag: 'Configuraciones y Reformas Laborales',
-    rss: 'https://news.google.com/rss/search?q=("reforma+laboral"+OR+precarizacion+OR+despidos+OR+paritarias+OR+sindicatos)+("Rio+Negro"+OR+Neuquen)+-accidente+-choque+-policial&hl=es-419&gl=AR&ceid=AR:es-419'
+    rss: `https://news.google.com/rss/search?q="reforma laboral" OR precarizacion OR despidos OR paritarias OR sindicatos ${regionalPortalsQuery} -accidente -choque -policial&hl=es-419&gl=AR&ceid=AR:es-419`
   },
   {
     tag: 'Políticas de Inversión (RIGI / Súper RIGI)',
-    rss: 'https://news.google.com/rss/search?q=(RIGI+OR+"Super+RIGI")+(inversiones+OR+"Vaca+Muerta"+OR+mineria)+("Rio+Negro"+OR+Neuquen)+-accidente+-futbol&hl=es-419&gl=AR&ceid=AR:es-419'
+    rss: `https://news.google.com/rss/search?q=RIGI OR "Super RIGI" OR inversiones OR "Vaca Muerta" ${regionalPortalsQuery} -accidente -futbol&hl=es-419&gl=AR&ceid=AR:es-419`
   },
   {
     tag: 'Perspectiva de Género',
-    rss: 'https://news.google.com/rss/search?q=("perspectiva+de+genero"+OR+"violencia+de+genero"+OR+feminismo+OR+disidencias+OR+"tareas+de+cuidado")+("Rio+Negro"+OR+Neuquen)+-accidente+-choque+-vial+-papa&hl=es-419&gl=AR&ceid=AR:es-419'
+    rss: `https://news.google.com/rss/search?q="perspectiva de genero" OR "violencia de genero" OR feminismo OR disidencias OR cuidado ${regionalPortalsQuery} -accidente -choque -vial -papa&hl=es-419&gl=AR&ceid=AR:es-419`
   },
   {
     tag: 'UNCo (Fiske Menuco / Neuquén)',
-    rss: 'https://news.google.com/rss/search?q=("Universidad+Nacional+del+Comahue"+OR+UNCo+OR+FADECS)+("General+Roca"+OR+"Fiske+Menuco"+OR+Neuquen)+-accidente+-choque+-futbol&hl=es-419&gl=AR&ceid=AR:es-419'
+    rss: `https://news.google.com/rss/search?q="Universidad Nacional del Comahue" OR UNCo OR FADECS OR "Fiske Menuco" ${regionalPortalsQuery} -accidente -choque -futbol&hl=es-419&gl=AR&ceid=AR:es-419`
   }
 ];
 
