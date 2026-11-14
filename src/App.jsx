@@ -419,7 +419,7 @@ const FadecsWorkspace = () => {
   const [editingText, setEditingText] = useState('');
 
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
-  const [mobileRoomTab, setMobileRoomTab] = useState('chat');
+  const [roomTab, setRoomTab] = useState('doc');
   const [newsList, setNewsList] = useState(fallbackNews);
   const [selectedCategory, setSelectedCategory] = useState('Todas');
   const [loadingNews, setLoadingNews] = useState(false);
@@ -580,6 +580,13 @@ const FadecsWorkspace = () => {
 
     return () => { unsubChat(); unsubDoc(); };
   }, [currentView, user]);
+
+  // Hacer scroll al fondo cuando se cambia a la pestaña de debate
+  useEffect(() => {
+    if (roomTab === 'chat') {
+      setTimeout(() => chatEndRef.current?.scrollIntoView({ behavior: 'smooth' }), 100);
+    }
+  }, [roomTab]);
 
   // 6. Enviar, Editar y Borrar Mensajes
   const sendMessage = async (e) => {
@@ -812,29 +819,29 @@ const FadecsWorkspace = () => {
             </div>
           </div>
         ) : (
-          <div className="flex-1 flex flex-col md:flex-row h-full overflow-hidden">
+          <div className="flex-1 flex flex-col h-full overflow-hidden">
 
-            {/* SELECTOR DE PESTAÑAS EN MOVIL */}
+            {/* SELECTOR DE PESTAÑAS EN TODOS LOS DISPOSITIVOS (PC Y MOVIL) */}
             {currentView.startsWith('sala-') && (
-              <div className="md:hidden flex border-b border-orange-200 bg-orange-100">
+              <div className="flex border-b border-orange-200 bg-orange-100 shrink-0">
                 <button
-                  onClick={() => setMobileRoomTab('doc')}
-                  className={`flex-1 py-2.5 text-xs font-bold text-center border-b-2 ${mobileRoomTab === 'doc' ? 'border-orange-500 text-orange-900 bg-white' : 'border-transparent text-orange-600'}`}
+                  onClick={() => setRoomTab('doc')}
+                  className={`flex-1 py-2.5 md:py-3 text-xs md:text-sm font-bold text-center border-b-2 transition-colors ${roomTab === 'doc' ? 'border-orange-500 text-orange-900 bg-white' : 'border-transparent text-orange-600 hover:bg-orange-200/50'}`}
                 >
                   📄 Documento Sala
                 </button>
                 <button
-                  onClick={() => setMobileRoomTab('chat')}
-                  className={`flex-1 py-2.5 text-xs font-bold text-center border-b-2 ${mobileRoomTab === 'chat' ? 'border-orange-500 text-orange-900 bg-white' : 'border-transparent text-orange-600'}`}
+                  onClick={() => setRoomTab('chat')}
+                  className={`flex-1 py-2.5 md:py-3 text-xs md:text-sm font-bold text-center border-b-2 transition-colors ${roomTab === 'chat' ? 'border-orange-500 text-orange-900 bg-white' : 'border-transparent text-orange-600 hover:bg-orange-200/50'}`}
                 >
                   💬 Debate ({messages.length})
                 </button>
               </div>
             )}
 
-            {/* ZONA DE DOCUMENTO (AMBAS OPCIONES: VISOR INCRUSTADO + BOTON EXTERNO) */}
-            {currentView.startsWith('sala-') && (
-              <div className={`${mobileRoomTab === 'doc' ? 'flex' : 'hidden'} md:flex flex-1 flex-col border-r border-orange-200 bg-white h-full overflow-hidden`}>
+            {/* ZONA DE DOCUMENTO (PESTAÑA DOCUMENTO EN TODOS LOS DISPOSITIVOS) */}
+            {currentView.startsWith('sala-') && roomTab === 'doc' && (
+              <div className="flex flex-1 flex-col bg-white h-full overflow-hidden">
                 <div className="p-3 md:p-4 bg-orange-100/30 border-b border-orange-200">
                   <div className="bg-yellow-50 border-l-4 border-yellow-400 p-2 mb-2.5 flex flex-col sm:flex-row sm:items-center justify-between gap-2">
                     <p className="text-xs text-yellow-800">
@@ -880,81 +887,83 @@ const FadecsWorkspace = () => {
               </div>
             )}
 
-            {/* ZONA DE CHAT */}
-            <div className={`${currentView.startsWith('sala-') && mobileRoomTab === 'doc' ? 'hidden md:flex' : 'flex'} ${currentView === 'chat-general' ? 'w-full max-w-4xl mx-auto md:my-6 md:rounded-xl md:shadow-lg md:border' : 'w-full md:w-96'} flex-1 md:flex-initial bg-white flex-col border-orange-200 h-full overflow-hidden`}>
-              <div className="p-3 md:p-4 border-b border-orange-200 bg-orange-100/50 flex justify-between items-center">
-                <h3 className="font-bold text-orange-800 text-sm md:text-base capitalize">
-                  {currentView === 'chat-general' ? 'Chat General Interdisciplinario' : `Debate - ${currentView.replace('-', ' ')}`}
-                </h3>
-              </div>
+            {/* ZONA DE CHAT (PESTAÑA DEBATE EN SALAS O VISTA DE CHAT GENERAL) */}
+            {(currentView === 'chat-general' || (currentView.startsWith('sala-') && roomTab === 'chat')) && (
+              <div className="w-full max-w-4xl mx-auto md:my-6 md:rounded-xl md:shadow-lg md:border flex-1 bg-white flex flex-col border-orange-200 h-full overflow-hidden">
+                <div className="p-3 md:p-4 border-b border-orange-200 bg-orange-100/50 flex justify-between items-center">
+                  <h3 className="font-bold text-orange-800 text-sm md:text-base capitalize">
+                    {currentView === 'chat-general' ? 'Chat General Interdisciplinario' : `Debate - ${currentView.replace('-', ' ')}`}
+                  </h3>
+                </div>
 
-              <div className="flex-1 p-3 md:p-4 overflow-y-auto bg-orange-50/30 flex flex-col gap-3">
-                {messages.length === 0 && <div className="text-center text-xs text-orange-400 mt-4">Comienza el debate...</div>}
-                {messages.map((msg) => {
-                  const isMine = msg.email === user.email;
-                  return (
-                    <div key={msg.id} className={`max-w-[90%] md:max-w-[85%] p-2.5 md:p-3 rounded-lg text-xs md:text-sm ${isMine ? 'bg-orange-500 text-white self-end rounded-tr-none shadow-sm' : 'bg-orange-100 text-orange-900 self-start rounded-tl-none border border-orange-200'}`}>
-                      <div className="flex items-center justify-between gap-2 mb-1">
-                        <span className={`text-[10px] font-bold ${isMine ? 'text-orange-100' : 'text-orange-600'}`}>
-                          {msg.sender} {msg.edited && <span className="italic font-normal opacity-80">(editado)</span>}
-                        </span>
+                <div className="flex-1 p-3 md:p-4 overflow-y-auto bg-orange-50/30 flex flex-col gap-3">
+                  {messages.length === 0 && <div className="text-center text-xs text-orange-400 mt-4">Comienza el debate...</div>}
+                  {messages.map((msg) => {
+                    const isMine = msg.email === user.email;
+                    return (
+                      <div key={msg.id} className={`max-w-[90%] md:max-w-[85%] p-2.5 md:p-3 rounded-lg text-xs md:text-sm ${isMine ? 'bg-orange-500 text-white self-end rounded-tr-none shadow-sm' : 'bg-orange-100 text-orange-900 self-start rounded-tl-none border border-orange-200'}`}>
+                        <div className="flex items-center justify-between gap-2 mb-1">
+                          <span className={`text-[10px] font-bold ${isMine ? 'text-orange-100' : 'text-orange-600'}`}>
+                            {msg.sender} {msg.edited && <span className="italic font-normal opacity-80">(editado)</span>}
+                          </span>
 
-                        {(isMine || isAdmin) && editingMsgId !== msg.id && (
-                          <div className="flex items-center gap-1.5 opacity-80 hover:opacity-100">
-                            {isMine && (
-                              <button onClick={() => startEditMessage(msg)} title="Editar mensaje" className="hover:scale-110 transition-transform text-[11px]">
-                                ✏️
+                          {(isMine || isAdmin) && editingMsgId !== msg.id && (
+                            <div className="flex items-center gap-1.5 opacity-80 hover:opacity-100">
+                              {isMine && (
+                                <button onClick={() => startEditMessage(msg)} title="Editar mensaje" className="hover:scale-110 transition-transform text-[11px]">
+                                  ✏️
+                                </button>
+                              )}
+                              <button onClick={() => handleDeleteMessage(msg.id)} title="Borrar mensaje" className="hover:scale-110 transition-transform text-[11px]">
+                                🗑️
                               </button>
-                            )}
-                            <button onClick={() => handleDeleteMessage(msg.id)} title="Borrar mensaje" className="hover:scale-110 transition-transform text-[11px]">
-                              🗑️
-                            </button>
+                            </div>
+                          )}
+                        </div>
+
+                        {editingMsgId === msg.id ? (
+                          <div className="mt-1 flex flex-col gap-1.5">
+                            <input
+                              type="text"
+                              value={editingText}
+                              maxLength={MAX_MSG_LENGTH}
+                              onChange={(e) => setEditingText(e.target.value)}
+                              className="w-full px-2 py-1 text-xs text-orange-900 bg-white rounded border border-orange-300 outline-none"
+                              autoFocus
+                            />
+                            <div className="flex justify-end gap-1 text-[10px]">
+                              <button onClick={() => setEditingMsgId(null)} className="px-2 py-0.5 bg-orange-700 text-white rounded">Cancelar</button>
+                              <button onClick={() => saveEditMessage(msg.id)} className="px-2 py-0.5 bg-white text-orange-600 font-bold rounded shadow">Guardar</button>
+                            </div>
                           </div>
+                        ) : (
+                          <div className="break-words leading-relaxed">{msg.text}</div>
                         )}
                       </div>
+                    );
+                  })}
+                  <div ref={chatEndRef} />
+                </div>
 
-                      {editingMsgId === msg.id ? (
-                        <div className="mt-1 flex flex-col gap-1.5">
-                          <input
-                            type="text"
-                            value={editingText}
-                            maxLength={MAX_MSG_LENGTH}
-                            onChange={(e) => setEditingText(e.target.value)}
-                            className="w-full px-2 py-1 text-xs text-orange-900 bg-white rounded border border-orange-300 outline-none"
-                            autoFocus
-                          />
-                          <div className="flex justify-end gap-1 text-[10px]">
-                            <button onClick={() => setEditingMsgId(null)} className="px-2 py-0.5 bg-orange-700 text-white rounded">Cancelar</button>
-                            <button onClick={() => saveEditMessage(msg.id)} className="px-2 py-0.5 bg-white text-orange-600 font-bold rounded shadow">Guardar</button>
-                          </div>
-                        </div>
-                      ) : (
-                        <div className="break-words leading-relaxed">{msg.text}</div>
-                      )}
-                    </div>
-                  );
-                })}
-                <div ref={chatEndRef} />
+                <form onSubmit={sendMessage} className="p-2.5 md:p-4 border-t border-orange-200 bg-white flex gap-2">
+                  <input
+                    type="text"
+                    value={newMessage}
+                    maxLength={MAX_MSG_LENGTH}
+                    onChange={(e) => setNewMessage(e.target.value)}
+                    placeholder="Escribe un mensaje..."
+                    className="flex-1 px-3 py-2 text-xs md:text-sm border border-orange-300 rounded focus:ring-2 focus:ring-orange-400 outline-none"
+                  />
+                  <button
+                    type="submit"
+                    disabled={isSending}
+                    className="px-4 py-2 bg-orange-500 text-white rounded font-bold hover:bg-orange-600 text-sm disabled:opacity-50"
+                  >
+                    →
+                  </button>
+                </form>
               </div>
-
-              <form onSubmit={sendMessage} className="p-2.5 md:p-4 border-t border-orange-200 bg-white flex gap-2">
-                <input
-                  type="text"
-                  value={newMessage}
-                  maxLength={MAX_MSG_LENGTH}
-                  onChange={(e) => setNewMessage(e.target.value)}
-                  placeholder="Escribe un mensaje..."
-                  className="flex-1 px-3 py-2 text-xs md:text-sm border border-orange-300 rounded focus:ring-2 focus:ring-orange-400 outline-none"
-                />
-                <button
-                  type="submit"
-                  disabled={isSending}
-                  className="px-4 py-2 bg-orange-500 text-white rounded font-bold hover:bg-orange-600 text-sm disabled:opacity-50"
-                >
-                  →
-                </button>
-              </form>
-            </div>
+            )}
 
           </div>
         )}
