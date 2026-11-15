@@ -51,6 +51,26 @@ const AUTO_ARCHIVE_INTERVAL_MS = 24 * 60 * 60 * 1000;
 const NEWS_STORAGE_KEY = "jifadecs_2027_rss_cache_v3";
 const ARCHIVE_CHECK_STORAGE_KEY = "jifadecs_2027_last_archive_check_v3";
 const INFOLEG_DATASET_URL = 'https://datos.jus.gob.ar/dataset/base-de-datos-legislativos-infoleg';
+const SAIJ_DATASET_URL = 'https://datos.jus.gob.ar/dataset/base-saij-de-normativa-provincial';
+const INFOLEG_METADATA_URL = 'https://github.com/datos-justicia-argentina/Base-de-datos-legislativos-infoleg/blob/master/Base-de-datos-legislativos-Infoleg-metadata.md';
+
+const norpatagoniaPortals = [
+  {
+    province: 'Río Negro',
+    links: [
+      { label: 'Digesto Jurídico', url: 'https://web.legisrn.gov.ar/digesto' },
+      { label: 'Legislación', url: 'https://web.legisrn.gov.ar/legislativa/legislacion' }
+    ]
+  },
+  {
+    province: 'Neuquén',
+    links: [
+      { label: 'Legislación del Poder Judicial', url: 'https://www.jusneuquen.gov.ar/legislacion/' },
+      { label: 'Boletines Oficiales', url: 'https://boficial.neuquen.gov.ar/Boletines' },
+      { label: 'Legislatura del Neuquén', url: 'https://www.legislaturaneuquen.gob.ar/' }
+    ]
+  }
+];
 
 const ADMIN_EMAILS = [
   'juliangallegos9057@gmail.com',
@@ -1458,6 +1478,10 @@ const FadecsWorkspace = () => {
             <button onClick={() => selectView('chat-general')} className={`w-full text-left px-3 py-2.5 rounded-md transition-colors text-sm font-medium ${currentView === 'chat-general' ? 'bg-orange-500 text-white shadow' : 'hover:bg-orange-200 text-orange-800'}`}>💬 Chat General</button>
             <button onClick={() => selectView('noticias')} className={`w-full text-left px-3 py-2.5 rounded-md transition-colors mt-1 text-sm font-medium ${currentView === 'noticias' ? 'bg-orange-500 text-white shadow' : 'hover:bg-orange-200 text-orange-800'}`}>📰 Ejes y Noticias</button>
             <button onClick={() => selectView('boletin-oficial')} className={`w-full text-left px-3 py-2.5 rounded-md transition-colors mt-1 text-sm font-medium ${currentView === 'boletin-oficial' ? 'bg-orange-500 text-white shadow' : 'hover:bg-orange-200 text-orange-800'}`}>📜 Boletín Oficial / DNU</button>
+            <p className="mt-1 rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-[11px] leading-snug text-amber-900">
+              <strong>Importante:</strong> Solo descargar base completa de InfoLEG y SAIJ si es necesario; si no, utilizarlas como apoyo de búsqueda.
+            </p>
+            <button onClick={() => selectView('norpatagonia')} className={`w-full text-left px-3 py-2.5 rounded-md transition-colors mt-2 text-sm font-medium ${currentView === 'norpatagonia' ? 'bg-orange-500 text-white shadow' : 'hover:bg-orange-200 text-orange-800'}`}>🧭 Norpatagonia</button>
             {isAdmin && (
               <button onClick={() => selectView('registro-debates')} className={`w-full text-left px-3 py-2.5 rounded-md transition-colors mt-1 text-sm font-medium ${currentView === 'registro-debates' ? 'bg-orange-500 text-white shadow' : 'hover:bg-orange-200 text-orange-800'}`}>🗂️ Registro Debates (24h)</button>
             )}
@@ -1601,6 +1625,40 @@ const FadecsWorkspace = () => {
           </div>
         )}
 
+        {/* VISTA: FUENTES NORMATIVAS DE RÍO NEGRO Y NEUQUÉN */}
+        {currentView === 'norpatagonia' && (
+          <div className="flex-1 overflow-y-auto p-4 md:p-8 bg-orange-50/50">
+            <div className="mb-6">
+              <h2 className="text-2xl md:text-3xl font-bold text-orange-800">Norpatagonia</h2>
+              <p className="mt-1 text-xs md:text-sm text-orange-700">
+                Fuentes oficiales de legislación, digesto jurídico y boletines de Río Negro y Neuquén.
+              </p>
+            </div>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              {norpatagoniaPortals.map((portal) => (
+                <section key={portal.province} className="rounded-xl border border-orange-200 bg-white p-5 shadow-sm">
+                  <h3 className="mb-3 text-lg font-bold text-orange-900">{portal.province}</h3>
+                  <ul className="space-y-2">
+                    {portal.links.map((link) => (
+                      <li key={link.url}>
+                        <a
+                          href={link.url}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="flex items-center justify-between rounded-lg bg-orange-50 px-3 py-2.5 text-sm font-semibold text-orange-800 hover:bg-orange-100"
+                        >
+                          <span>{link.label}</span>
+                          <span aria-hidden="true">↗</span>
+                        </a>
+                      </li>
+                    ))}
+                  </ul>
+                </section>
+              ))}
+            </div>
+          </div>
+        )}
+
         {/* VISTA 2: BOLETIN OFICIAL Y LEGISLACION HISTORICA (INFOLEG MODERNO + BASE CSV BAJO DEMANDA) */}
         {currentView === 'boletin-oficial' && (
           <div className="flex-1 overflow-y-auto p-4 md:p-8 bg-orange-50/50">
@@ -1619,6 +1677,22 @@ const FadecsWorkspace = () => {
                   className="px-3 py-2 bg-white border border-orange-300 text-orange-900 rounded-lg font-bold text-xs md:text-sm hover:bg-orange-100 shadow-sm"
                 >
                   📥 CSV y bases oficiales actualizadas ↗
+                </a>
+                <a
+                  href={SAIJ_DATASET_URL}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="px-3 py-2 bg-white border border-orange-300 text-orange-900 rounded-lg font-bold text-xs md:text-sm hover:bg-orange-100 shadow-sm"
+                >
+                  📚 Base provincial SAIJ ↗
+                </a>
+                <a
+                  href={INFOLEG_METADATA_URL}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="px-3 py-2 bg-white border border-orange-300 text-orange-900 rounded-lg font-bold text-xs md:text-sm hover:bg-orange-100 shadow-sm"
+                >
+                  📄 Metadatos InfoLEG ↗
                 </a>
                 {!infolegLoaded && (
                   <button
