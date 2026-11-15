@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { initializeApp } from 'firebase/app';
 import { getAuth, GoogleAuthProvider, signInWithPopup, signOut, onAuthStateChanged } from 'firebase/auth';
-import { getFirestore, collection, addDoc, query, orderBy, onSnapshot, serverTimestamp, doc, setDoc, deleteDoc, updateDoc } from 'firebase/firestore';
+import { getFirestore, collection, addDoc, query, orderBy, limit, onSnapshot, serverTimestamp, doc, setDoc, deleteDoc, updateDoc, getDocs } from 'firebase/firestore';
 
 // 1. Configuracion de Firebase
 const firebaseConfig = {
@@ -19,10 +19,42 @@ const auth = getAuth(app);
 const db = getFirestore(app);
 const provider = new GoogleAuthProvider();
 
-// Constantes globales
-const DRIVE_REPO_URL = "https://drive.google.com/drive/folders/1E-9JMFs1ot4Y1Omp_OJSbcl3Ilu_PfH3";
+// Enlaces de Google Drive y Google Docs (fragmentados para seguridad de sintaxis)
+const DRIVE_REPO_URL = [
+  'https://drive.google.com/drive/folders/',
+  '1E-9JMFs1ot4Y1Omp_OJSbcl3Ilu',
+  '_PfH3'
+].join('');
+
+const CHATS_FOLDER_URL = [
+  'https://drive.google.com/drive/folders/',
+  '1dY_-8UTXaqdgxPiLWlsCgx461G08',
+  '-hIh'
+].join('');
+
+const DEFAULT_GENERAL_CHAT_DOC_URL = [
+  'https://docs.google.com/document/d/',
+  '10Y7r4XoPMo_L9DC35ejvKCJ53NxeD',
+  '-k4jZO4x9w_I0w/edit?usp=drivesdk'
+].join('');
+
+const DEFAULT_SALAS_CHAT_DOC_URL = [
+  'https://docs.google.com/document/d/',
+  '13kZdUmplKvgboCANWE0IgbOUlRNrt',
+  'fBROJhz0LGZ-aI/edit?usp=drivesdk'
+].join('');
+
 const MAX_MSG_LENGTH = 1000;
-const NEWS_CACHE_TTL_MS = 5 * 60 * 1000;
+const LIVE_CHAT_LIMIT = 150;
+const NEWS_CACHE_TTL_MS = 30 * 60 * 1000; // 30 minutos de cache persistente
+const AUTO_ARCHIVE_INTERVAL_MS = 24 * 60 * 60 * 1000; // 24 horas
+const NEWS_STORAGE_KEY = "jifadecs_2027_rss_cache_v3";
+const ARCHIVE_CHECK_STORAGE_KEY = "jifadecs_2027_last_archive_check_v3";
+
+const ADMIN_EMAILS = [
+  'juliangallegos9057@gmail.com',
+  'jifadecs@gmail.com'
+];
 
 // Normalizador de texto sin regex complejas: minusculas y sin tildes
 const normalizeText = (str) => {
@@ -37,7 +69,7 @@ const normalizeText = (str) => {
     .replace(/ü/g, 'u');
 };
 
-// Generador de hash determinista Argon/FNV-1a para integridad de IDs y deduplicacion
+// Generador de hash determinista Argon/FNV-1a para integridad de IDs y cache
 const createDeterministicHash = (input) => {
   const clean = normalizeText(input);
   let hash = 0x811c9dc5;
@@ -74,7 +106,7 @@ const stripHtml = (html) => {
     .trim();
 };
 
-// Extrae enlace directo si viene dentro del HTML de Google News sin usar regex fragiles
+// Extrae enlace directo si viene dentro del HTML de Google News
 const extractRealUrlFromHtml = (htmlString, rawLink) => {
   if (rawLink && typeof rawLink === 'string' && !rawLink.includes('news.google.com')) {
     return rawLink.trim();
@@ -137,7 +169,7 @@ const getDirectArticleUrl = (urlString) => {
   }
 };
 
-// Mapeo de nombres de medios segun dominio para que coincida siempre el diario con el link
+// Mapeo de nombres de medios segun dominio
 const resolveSourceFromUrl = (urlString, fallbackSource) => {
   try {
     let host = new URL(urlString).hostname.toLowerCase();
@@ -238,7 +270,6 @@ const globalExclusions = [
   'ahogado', 'desaparecido', 'buscan a', 'ambulancia', 'heridos', 'hospitalizaron'
 ];
 
-// Verifica que la noticia pertenezca a Rio Negro o Neuquen y no a otras provincias/ciudades
 const isRnOrNqNews = (normText, sourceName) => {
   for (const otherPlace of excludedOtherProvincesAndCities) {
     if (normText.includes(otherPlace)) {
@@ -252,7 +283,6 @@ const isRnOrNqNews = (normText, sourceName) => {
   return rnNqTerritoryTerms.some(term => normSource.includes(term));
 };
 
-// Clasificador y validador estricto sobre el TEXTO REAL de la noticia
 const matchesCategoryStrictly = (realTitle, realDesc, sourceName, category) => {
   const normText = normalizeText(`${realTitle} ${realDesc}`);
 
@@ -317,6 +347,180 @@ const matchesCategoryStrictly = (realTitle, realDesc, sourceName, category) => {
 
   return false;
 };
+
+// Repertorio Historico de Boletin Oficial e InfoLEG
+const officialGazetteNorms = [
+  {
+    id: 'bo-nk-1',
+    period: 'Néstor Kirchner y Cristina Fernández (2003-2015)',
+    normType: 'Ley 25.877',
+    title: 'Ley 25.877 - Régimen de Ordenamiento Laboral y Negociación Colectiva (Derogación de la Ley Banelco)',
+    date: '19 Mar 2004',
+    axis: 'Configuraciones y Reformas Laborales',
+    summary: 'Deroga la Ley 25.250 de flexibilización laboral, restablece la ultraactividad de los convenios colectivos y fortalece el poder de negociación paritaria de los trabajadores.',
+    url: 'https://servicios.infoleg.gob.ar/infolegInternet/verNorma.do?id=93595'
+  },
+  {
+    id: 'bo-nk-2',
+    period: 'Néstor Kirchner y Cristina Fernández (2003-2015)',
+    normType: 'Ley 26.160',
+    title: 'Ley 26.160 - Emergencia en Materia de Posesión y Propiedad de Tierras Indígenas',
+    date: '23 Nov 2006',
+    axis: 'Desigualdades Socio-Territoriales',
+    summary: 'Suspende la ejecución de sentencias de desalojo y ordena el relevamiento técnico-jurídico-catastral de las tierras ocupadas tradicionalmente por comunidades indígenas.',
+    url: 'https://servicios.infoleg.gob.ar/infolegInternet/verNorma.do?id=122499'
+  },
+  {
+    id: 'bo-cfk-1',
+    period: 'Néstor Kirchner y Cristina Fernández (2003-2015)',
+    normType: 'Ley 26.485',
+    title: 'Ley 26.485 - Protección Integral para Prevenir, Sancionar y Erradicar la Violencia contra las Mujeres',
+    date: '01 Abr 2009',
+    axis: 'Perspectiva de Género',
+    summary: 'Tipifica las violencias física, psicológica, sexual, económica, patrimonial y simbólica, transformando el marco jurídico de protección de derechos y relaciones de género.',
+    url: 'https://servicios.infoleg.gob.ar/infolegInternet/verNorma.do?id=152155'
+  },
+  {
+    id: 'bo-cfk-2',
+    period: 'Néstor Kirchner y Cristina Fernández (2003-2015)',
+    normType: 'DNU 1602/2009',
+    title: 'Decreto 1602/2009 - Creación de la Asignación Universal por Hijo para Protección Social (AUH)',
+    date: '29 Oct 2009',
+    axis: 'Desigualdades Socio-Territoriales',
+    summary: 'Extiende las asignaciones familiares a trabajadores no registrados y desocupados, reconfigurando la política social y el piso de ingresos de la niñez.',
+    url: 'https://servicios.infoleg.gob.ar/infolegInternet/verNorma.do?id=159466'
+  },
+  {
+    id: 'bo-cfk-3',
+    period: 'Néstor Kirchner y Cristina Fernández (2003-2015)',
+    normType: 'Ley 26.741',
+    title: 'Ley 26.741 - Soberanía Hidrocarburífera de la República Argentina y Expropiación del 51% de YPF',
+    date: '04 May 2012',
+    axis: 'Extractivismo y Minería',
+    summary: 'Declara de interés público nacional el autoabastecimiento de hidrocarburos y recupera el control estatal de YPF, impulsando el desarrollo a gran escala de Vaca Muerta en Neuquén y Río Negro.',
+    url: 'https://servicios.infoleg.gob.ar/infolegInternet/verNorma.do?id=196894'
+  },
+  {
+    id: 'bo-cfk-4',
+    period: 'Néstor Kirchner y Cristina Fernández (2003-2015)',
+    normType: 'Ley 26.743',
+    title: 'Ley 26.743 - Derecho a la Identidad de Género de las Personas',
+    date: '23 May 2012',
+    axis: 'Perspectiva de Género',
+    summary: 'Reconoce el derecho a la identidad de género autopercibida sin requisitos patologizantes ni judiciales y garantiza el acceso integral a la salud.',
+    url: 'https://servicios.infoleg.gob.ar/infolegInternet/verNorma.do?id=197860'
+  },
+  {
+    id: 'bo-mm-1',
+    period: 'Mauricio Macri (2015-2019)',
+    normType: 'DNU 267/2015',
+    title: 'Decreto 267/2015 - Creación del ENACOM y Modificación de la Ley de Servicios de Comunicación Audiovisual',
+    date: '29 Dic 2015',
+    axis: 'Desigualdades Socio-Territoriales',
+    summary: 'Modifica por Decreto de Necesidad y Urgencia los límites a la concentración de licencias de medios y altera la estructura regulatoria de la Ley 26.522.',
+    url: 'https://servicios.infoleg.gob.ar/infolegInternet/verNorma.do?id=257461'
+  },
+  {
+    id: 'bo-mm-2',
+    period: 'Mauricio Macri (2015-2019)',
+    normType: 'DNU 70/2017',
+    title: 'Decreto 70/2017 - Modificación de la Ley de Migraciones 25.871',
+    date: '27 Ene 2017',
+    axis: 'Desigualdades Socio-Territoriales',
+    summary: 'Endurece los controles migratorios y crea un procedimiento sumarísimo de expulsión, restringiendo garantías de defensa (posteriormente derogado en 2021).',
+    url: 'https://servicios.infoleg.gob.ar/infolegInternet/verNorma.do?id=271245'
+  },
+  {
+    id: 'bo-mm-3',
+    period: 'Mauricio Macri (2015-2019)',
+    normType: 'Ley 27.426',
+    title: 'Ley 27.426 - Reforma Previsional y Modificación de la Fórmula de Movilidad Jubilatoria',
+    date: '28 Dic 2017',
+    axis: 'Configuraciones y Reformas Laborales',
+    summary: 'Cambia el cálculo de actualización de haberes jubilatorios y asignaciones sociales, además de elevar la opción de edad jubilatoria a los 70 años.',
+    url: 'https://servicios.infoleg.gob.ar/infolegInternet/verNorma.do?id=305262'
+  },
+  {
+    id: 'bo-mm-4',
+    period: 'Mauricio Macri (2015-2019)',
+    normType: 'Ley 27.453',
+    title: 'Ley 27.453 - Régimen de Regularización Dominial para la Integración Socio Urbana (RENABAP)',
+    date: '25 Oct 2018',
+    axis: 'Desigualdades Socio-Territoriales',
+    summary: 'Declara de utilidad pública y sujetos a expropiación los terrenos de barrios populares relevados en el RENABAP y suspende desalojos.',
+    url: 'https://servicios.infoleg.gob.ar/infolegInternet/verNorma.do?id=315739'
+  },
+  {
+    id: 'bo-af-1',
+    period: 'Alberto Fernández (2019-2023)',
+    normType: 'DNU 34/2019',
+    title: 'Decreto 34/2019 - Emergencia Pública en Materia Ocupacional y Doble Indemnización por Despidos',
+    date: '13 Dic 2019',
+    axis: 'Configuraciones y Reformas Laborales',
+    summary: 'Declara la emergencia ocupacional y establece el derecho a percibir el doble de la indemnización legal en casos de despido sin justa causa.',
+    url: 'https://servicios.infoleg.gob.ar/infolegInternet/verNorma.do?id=333297'
+  },
+  {
+    id: 'bo-af-2',
+    period: 'Alberto Fernández (2019-2023)',
+    normType: 'Ley 27.551',
+    title: 'Ley 27.551 - Reforma del Código Civil y Comercial sobre Contratos de Locación (Ley de Alquileres)',
+    date: '11 Jun 2020',
+    axis: 'Desigualdades Socio-Territoriales',
+    summary: 'Establece un plazo mínimo legal de 3 años para alquileres habitacionales y actualización anual mediante índice mixto entre inflación (IPC) y salarios (RIPTE).',
+    url: 'https://servicios.infoleg.gob.ar/infolegInternet/verNorma.do?id=339378'
+  },
+  {
+    id: 'bo-af-3',
+    period: 'Alberto Fernández (2019-2023)',
+    normType: 'Ley 27.610',
+    title: 'Ley 27.610 - Acceso a la Interrupción Voluntaria del Embarazo (IVE) y Atención Posaborto',
+    date: '30 Dic 2020',
+    axis: 'Perspectiva de Género',
+    summary: 'Consagra el derecho a decidir la interrupción del embarazo hasta la semana 14 inclusive y regula su cobertura gratuita en todo el sistema de salud.',
+    url: 'https://servicios.infoleg.gob.ar/infolegInternet/verNorma.do?id=346231'
+  },
+  {
+    id: 'bo-af-4',
+    period: 'Alberto Fernández (2019-2023)',
+    normType: 'Ley 27.636',
+    title: 'Ley 27.636 - Promoción del Acceso al Empleo Formal para Personas Travestis, Transexuales y Transgénero',
+    date: '24 Jun 2021',
+    axis: 'Perspectiva de Género',
+    summary: 'Ley Diana Sacayán - Lohana Berkins: establece un cupo mínimo del 1% de los cargos del sector público nacional e incentivos para la contratación registrada.',
+    url: 'https://servicios.infoleg.gob.ar/infolegInternet/verNorma.do?id=351815'
+  },
+  {
+    id: 'bo-jm-1',
+    period: 'Javier Milei (2023-Presente)',
+    normType: 'DNU 70/2023',
+    title: 'Decreto 70/2023 - Bases para la Reconstrucción de la Economía Argentina (Desregulación Económica)',
+    date: '20 Dic 2023',
+    axis: 'Configuraciones y Reformas Laborales',
+    summary: 'Deroga la Ley de Alquileres, la Ley de Abastecimiento y la Ley de Tierras, impulsa privatizaciones de empresas públicas y reforma el régimen laboral.',
+    url: 'https://servicios.infoleg.gob.ar/infolegInternet/verNorma.do?id=395521'
+  },
+  {
+    id: 'bo-jm-2',
+    period: 'Javier Milei (2023-Presente)',
+    normType: 'Ley 27.742',
+    title: 'Ley 27.742 - Ley de Bases y Puntos de Partida para la Libertad de los Argentinos (RIGI y Reforma Laboral)',
+    date: '27 Jun 2024',
+    axis: 'Políticas de Inversión (RIGI / Súper RIGI)',
+    summary: 'Crea el Régimen de Incentivo para Grandes Inversiones (RIGI) con beneficios fiscales, aduaneros y cambiarios por 30 años, y elimina multas por trabajo no registrado.',
+    url: 'https://servicios.infoleg.gob.ar/infolegInternet/verNorma.do?id=401266'
+  },
+  {
+    id: 'bo-jm-3',
+    period: 'Javier Milei (2023-Presente)',
+    normType: 'DNU 1083/2024',
+    title: 'Decreto 1083/2024 - Derogación de la Prórroga de la Emergencia Territorial Indígena (Ley 26.160)',
+    date: '09 Dic 2024',
+    axis: 'Extractivismo y Minería',
+    summary: 'Da por finalizada la emergencia en materia de posesión y propiedad de tierras indígenas, habilitando nuevamente procesos de desalojo en territorios comunitarios.',
+    url: 'https://www.boletinoficial.gob.ar/detalleAviso/primera/317965/20241210'
+  }
+];
 
 // Noticias verificadas con enlaces directos a articulos especificos reales
 const fallbackNews = [
@@ -404,13 +608,48 @@ const thematicFeeds = [
   }
 ];
 
+const DEFAULT_ROOMS = [
+  { id: 'sala-1', name: 'Monografía 1', allowedEmails: [] },
+  { id: 'sala-2', name: 'Monografía 2', allowedEmails: [] },
+  { id: 'sala-3', name: 'Monografía 3', allowedEmails: [] }
+];
+
+// Lectura segura de cache RSS desde localStorage al iniciar
+const getInitialCachedNews = () => {
+  try {
+    const raw = localStorage.getItem(NEWS_STORAGE_KEY);
+    if (!raw) return fallbackNews;
+    const parsed = JSON.parse(raw);
+    if (parsed && Array.isArray(parsed.items) && parsed.items.length > 0) {
+      return parsed.items;
+    }
+    return fallbackNews;
+  } catch {
+    return fallbackNews;
+  }
+};
+
 const FadecsWorkspace = () => {
   const [user, setUser] = useState(null);
   const [currentView, setCurrentView] = useState('chat-general');
-  const [roomsCount, setRoomsCount] = useState(3);
+  const [roomsList, setRoomsList] = useState(DEFAULT_ROOMS);
+  const [editingRoomId, setEditingRoomId] = useState(null);
+  const [editingRoomName, setEditingRoomName] = useState('');
+
+  // Control de documentos, privacidad de sala y registro 24h con enlaces fijos
   const [activeDocUrl, setActiveDocUrl] = useState('');
   const [docInput, setDocInput] = useState('');
   const [docError, setDocError] = useState('');
+  const [roomAllowedEmails, setRoomAllowedEmails] = useState([]);
+  const [newAllowedEmailInput, setNewAllowedEmailInput] = useState('');
+
+  const [lastArchiveSyncMs, setLastArchiveSyncMs] = useState(0);
+  const [isSyncingArchive, setIsSyncingArchive] = useState(false);
+  const [archiveStatusMsg, setArchiveStatusMsg] = useState('');
+  const [compiledGeneralText, setCompiledGeneralText] = useState('');
+  const [compiledSalasText, setCompiledSalasText] = useState('');
+  const [archivePreviewTab, setArchivePreviewTab] = useState('general');
+
   const [messages, setMessages] = useState([]);
   const [newMessage, setNewMessage] = useState('');
   const [isSending, setIsSending] = useState(false);
@@ -420,13 +659,47 @@ const FadecsWorkspace = () => {
 
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const [roomTab, setRoomTab] = useState('doc');
-  const [newsList, setNewsList] = useState(fallbackNews);
+  const [newsList, setNewsList] = useState(getInitialCachedNews);
   const [selectedCategory, setSelectedCategory] = useState('Todas');
   const [loadingNews, setLoadingNews] = useState(false);
+  const [selectedPeriod, setSelectedPeriod] = useState('Todos');
 
   const chatEndRef = useRef(null);
-  const lastFetchTimeRef = useRef(0);
-  const isAdmin = user?.email === 'juliangallegos9057@gmail.com';
+  const archiveRunningRef = useRef(false);
+  const rssFetchingRef = useRef(false);
+
+  const userEmailLower = user?.email ? user.email.toLowerCase().trim() : '';
+  const isAdmin = ADMIN_EMAILS.includes(userEmailLower);
+
+  // Filtrado de visibilidad silencioso: cada usuario solo ve las salas donde su correo esta habilitado
+  const visibleRooms = isAdmin
+    ? roomsList
+    : roomsList.filter((rm) => {
+        const list = Array.isArray(rm.allowedEmails)
+          ? rm.allowedEmails.map(e => String(e).toLowerCase().trim())
+          : [];
+        return list.includes(userEmailLower);
+      });
+
+  const isCurrentRoomView = currentView.startsWith('sala-');
+  const currentRoomObj = roomsList.find(r => r.id === currentView);
+  const currentRoomEmailsFromConfig = Array.isArray(currentRoomObj?.allowedEmails)
+    ? currentRoomObj.allowedEmails.map(e => String(e).toLowerCase().trim())
+    : [];
+  const effectiveAllowedEmails = Array.from(new Set([...currentRoomEmailsFromConfig, ...roomAllowedEmails]));
+  const hasRoomAccess = !isCurrentRoomView || isAdmin || effectiveAllowedEmails.includes(userEmailLower);
+
+  // Redireccion silenciosa (sin cartel de bloqueo) si un usuario no autorizado intenta estar en una vista restringida
+  useEffect(() => {
+    if (!user) return;
+    if (currentView === 'registro-debates' && !isAdmin) {
+      setCurrentView('chat-general');
+      return;
+    }
+    if (isCurrentRoomView && !hasRoomAccess) {
+      setCurrentView('chat-general');
+    }
+  }, [currentView, isCurrentRoomView, hasRoomAccess, isAdmin, user]);
 
   // 2. Control de Sesion
   useEffect(() => {
@@ -446,83 +719,370 @@ const FadecsWorkspace = () => {
 
   const logout = () => signOut(auth);
 
-  // 3. Sincronizacion de Cantidad de Salas
+  // 3. Sincronizacion de Configuracion General
   useEffect(() => {
     if (!user) return;
     const unsub = onSnapshot(doc(db, 'config', 'general'), (docSnap) => {
       if (docSnap.exists()) {
-        const count = Number(docSnap.data().roomsCount) || 1;
-        setRoomsCount(Math.min(Math.max(1, count), 30));
+        const data = docSnap.data();
+        if (Array.isArray(data.roomsList) && data.roomsList.length > 0) {
+          setRoomsList(data.roomsList.map(r => ({
+            ...r,
+            allowedEmails: Array.isArray(r.allowedEmails) ? r.allowedEmails : []
+          })));
+        } else if (data.roomsCount) {
+          const count = Math.min(Math.max(1, Number(data.roomsCount) || 3), 30);
+          const generated = Array.from({ length: count }).map((_, idx) => ({
+            id: `sala-${idx + 1}`,
+            name: `Monografía ${idx + 1}`,
+            allowedEmails: []
+          }));
+          setRoomsList(generated);
+        }
+        setLastArchiveSyncMs(Number(data.lastArchiveSyncMs) || 0);
       }
     });
     return () => unsub();
   }, [user]);
 
-  const updateRoomsCount = async (newCount) => {
-    if (!isAdmin) return;
-    const boundedCount = Math.min(Math.max(1, newCount), 30);
-    setRoomsCount(boundedCount);
+  // Escucha del ultimo registro 24h (solo para cuentas autorizadas)
+  useEffect(() => {
+    if (!user || !isAdmin || currentView !== 'registro-debates') return;
+    const unsubArchive = onSnapshot(doc(db, 'archivos_debates', 'ultimo_registro'), (docSnap) => {
+      if (docSnap.exists()) {
+        const data = docSnap.data();
+        setCompiledGeneralText(data.chatGeneralText || '');
+        setCompiledSalasText(data.salasDebatesText || '');
+      }
+    });
+    return () => unsubArchive();
+  }, [user, isAdmin, currentView]);
+
+  // Crear nueva sala de monografia
+  const handleAddRoom = async () => {
+    if (!isAdmin || roomsList.length >= 30) return;
+    const nextNum = roomsList.length + 1;
+    const uniqueId = `sala-${Date.now()}`;
+    const updated = [...roomsList, { id: uniqueId, name: `Monografía ${nextNum}`, allowedEmails: [] }];
+    setRoomsList(updated);
     try {
-      await setDoc(doc(db, 'config', 'general'), { roomsCount: boundedCount }, { merge: true });
+      await setDoc(doc(db, 'config', 'general'), { roomsList: updated }, { merge: true });
     } catch (err) {
-      console.error('Error al actualizar cantidad de salas:', err);
+      console.error('Error al agregar sala:', err);
     }
   };
 
-  // 4. Busqueda automatica validando texto real antes de construir cada tarjeta y asegurando enlace directo
-  const fetchLiveNews = async (forceRefresh = false) => {
-    const now = Date.now();
-    if (!forceRefresh && now - lastFetchTimeRef.current < NEWS_CACHE_TTL_MS) {
+  // Editar nombre de una monografia especifica
+  const handleSaveRoomName = async (roomId) => {
+    if (!isAdmin) return;
+    const trimmed = editingRoomName.trim();
+    if (!trimmed) return;
+    const updated = roomsList.map(r => r.id === roomId ? { ...r, name: trimmed } : r);
+    setRoomsList(updated);
+    setEditingRoomId(null);
+    setEditingRoomName('');
+    try {
+      await setDoc(doc(db, 'config', 'general'), { roomsList: updated }, { merge: true });
+    } catch (err) {
+      console.error('Error al renombrar sala:', err);
+    }
+  };
+
+  // Eliminar especificamente la monografia elegida
+  const handleDeleteSpecificRoom = async (roomObj) => {
+    if (!isAdmin) return;
+    if (!window.confirm(`¿Seguro que deseas eliminar "${roomObj.name}" de la lista de grupos?`)) return;
+    const updated = roomsList.filter(r => r.id !== roomObj.id);
+    setRoomsList(updated);
+    if (currentView === roomObj.id) {
+      setCurrentView('chat-general');
+    }
+    try {
+      await setDoc(doc(db, 'config', 'general'), { roomsList: updated }, { merge: true });
+    } catch (err) {
+      console.error('Error al eliminar sala:', err);
+    }
+  };
+
+  // Agregar correo autorizado a una sala de monografia (actualiza tambien el listado de visibilidad del menu)
+  const handleAddAllowedEmail = async (e) => {
+    e.preventDefault();
+    if (!isAdmin || !isCurrentRoomView) return;
+    const cleanEmail = newAllowedEmailInput.trim().toLowerCase();
+    if (!cleanEmail || !cleanEmail.includes('@')) return;
+    if (effectiveAllowedEmails.includes(cleanEmail)) {
+      setNewAllowedEmailInput('');
       return;
     }
+    const updatedEmails = [...effectiveAllowedEmails, cleanEmail];
+    setRoomAllowedEmails(updatedEmails);
+    const updatedRoomsList = roomsList.map(r =>
+      r.id === currentView ? { ...r, allowedEmails: updatedEmails } : r
+    );
+    setRoomsList(updatedRoomsList);
+    setNewAllowedEmailInput('');
+    try {
+      await Promise.all([
+        setDoc(doc(db, 'salas', currentView), { allowedEmails: updatedEmails }, { merge: true }),
+        setDoc(doc(db, 'config', 'general'), { roomsList: updatedRoomsList }, { merge: true })
+      ]);
+    } catch (err) {
+      console.error('Error al autorizar correo en la sala:', err);
+    }
+  };
 
+  // Quitar correo autorizado de una sala (oculta inmediatamente la sala del menu de ese usuario)
+  const handleRemoveAllowedEmail = async (emailToRemove) => {
+    if (!isAdmin || !isCurrentRoomView) return;
+    const updatedEmails = effectiveAllowedEmails.filter(em => em !== emailToRemove);
+    setRoomAllowedEmails(updatedEmails);
+    const updatedRoomsList = roomsList.map(r =>
+      r.id === currentView ? { ...r, allowedEmails: updatedEmails } : r
+    );
+    setRoomsList(updatedRoomsList);
+    try {
+      await Promise.all([
+        setDoc(doc(db, 'salas', currentView), { allowedEmails: updatedEmails }, { merge: true }),
+        setDoc(doc(db, 'config', 'general'), { roomsList: updatedRoomsList }, { merge: true })
+      ]);
+    } catch (err) {
+      console.error('Error al quitar correo de la sala:', err);
+    }
+  };
+
+  // 4. Motor de Registro Automatizado cada 24h (Exclusivo para Cuentas Autorizadas)
+  const runDebateArchiveSync = async (isManual = false) => {
+    if (!isAdmin || archiveRunningRef.current || isSyncingArchive) return;
+    archiveRunningRef.current = true;
+    setIsSyncingArchive(true);
+    if (isManual) setArchiveStatusMsg('Recopilando el Chat General y unificando todas las Salas por su nombre...');
+
+    try {
+      const nowStr = new Date().toLocaleString('es-AR');
+
+      // A. Lectura del Chat General
+      const genSnap = await getDocs(query(collection(db, 'salas', 'chat-general', 'mensajes'), orderBy('createdAt', 'asc')));
+      const generalLines = genSnap.docs.map(d => {
+        const m = d.data();
+        const dateTxt = m.createdAt?.toDate ? m.createdAt.toDate().toLocaleString('es-AR') : 'Reciente';
+        return `[${dateTxt}] ${m.sender} (${m.email}): ${m.text}`;
+      });
+      const generalReport = `=== JIFADECS 2027 - CHAT GENERAL INTERDISCIPLINARIO ===\nÚltima actualización: ${nowStr}\nTotal de intervenciones: ${generalLines.length}\n\n` + (generalLines.join('\n') || 'Sin mensajes registrados.');
+
+      // B. Lectura paralela de todas las Salas de Monografia y unificacion en un solo documento separado por Nombre de Sala
+      const roomQueries = roomsList.map(async (rm) => {
+        const rmSnap = await getDocs(query(collection(db, 'salas', rm.id, 'mensajes'), orderBy('createdAt', 'asc')));
+        const rmLines = rmSnap.docs.map(d => {
+          const m = d.data();
+          const dateTxt = m.createdAt?.toDate ? m.createdAt.toDate().toLocaleString('es-AR') : 'Reciente';
+          return `[${dateTxt}] ${m.sender} (${m.email}): ${m.text}`;
+        });
+        return `============================================================\nSALA: ${rm.name.toUpperCase()}\nTotal de mensajes en esta sala: ${rmLines.length}\n============================================================\n` + (rmLines.join('\n') || 'Sin intervenciones registradas en esta sala.');
+      });
+
+      const roomsBlocks = await Promise.all(roomQueries);
+      const salasReport = `=== JIFADECS 2027 - CHAT DE SALAS DE DEBATE (UNIFICADO POR SALA) ===\nÚltima actualización: ${nowStr}\nCantidad de salas registradas: ${roomsList.length}\n\n` + roomsBlocks.join('\n\n\n');
+
+      setCompiledGeneralText(generalReport);
+      setCompiledSalasText(salasReport);
+
+      const nowMs = Date.now();
+      const combinedHash = createDeterministicHash(generalReport + salasReport);
+
+      await setDoc(doc(db, 'archivos_debates', 'ultimo_registro'), {
+        contentHash: combinedHash,
+        updatedAtMs: nowMs,
+        updatedAtFormatted: nowStr,
+        chatGeneralText: generalReport,
+        salasDebatesText: salasReport
+      }, { merge: true });
+
+      await setDoc(doc(db, 'config', 'general'), { lastArchiveSyncMs: nowMs }, { merge: true });
+      try {
+        localStorage.setItem(ARCHIVE_CHECK_STORAGE_KEY, String(nowMs));
+      } catch {
+        // Ignorar si localStorage esta restringido
+      }
+
+      if (isManual) {
+        setArchiveStatusMsg(`✅ Registro actualizado (${nowStr}). Ya podés copiarlo con 1 toque o abrir el Google Doc.`);
+      }
+    } catch (err) {
+      console.error('Error al sincronizar archivo de debates:', err);
+      if (isManual) setArchiveStatusMsg('⚠️ Error al sincronizar el registro. Verifica tu conexión.');
+    } finally {
+      archiveRunningRef.current = false;
+      setIsSyncingArchive(false);
+    }
+  };
+
+  // Verificador sin bucles para el auto-archivado cada 24 horas (solo se ejecuta en cuentas autorizadas)
+  useEffect(() => {
+    if (!user || !isAdmin || archiveRunningRef.current) return;
+    const now = Date.now();
+    let localLastCheck = 0;
+    try {
+      localLastCheck = Number(localStorage.getItem(ARCHIVE_CHECK_STORAGE_KEY)) || 0;
+    } catch {
+      localLastCheck = 0;
+    }
+    const effectiveLastSync = Math.max(lastArchiveSyncMs, localLastCheck);
+    if (effectiveLastSync === 0 || now - effectiveLastSync >= AUTO_ARCHIVE_INTERVAL_MS) {
+      runDebateArchiveSync(false);
+    }
+  }, [user, isAdmin]);
+
+  // Copiar directamente al portapapeles del celular para pegar en la app de Google Docs con 1 toque
+  const handleCopyArchiveToClipboard = async (type) => {
+    if (!isAdmin) return;
+    let textToCopy = type === 'general' ? compiledGeneralText : compiledSalasText;
+    if (!textToCopy) {
+      await runDebateArchiveSync(true);
+      textToCopy = type === 'general' ? compiledGeneralText : compiledSalasText;
+    }
+    try {
+      await navigator.clipboard.writeText(textToCopy || 'Sin mensajes registrados aún.');
+      setArchiveStatusMsg(
+        type === 'general'
+          ? '📋 ¡Texto del Chat General copiado! Abrí el Google Doc de abajo y pegalo directo.'
+          : '📋 ¡Texto unificado de todas las Salas copiado! Abrí el Google Doc de Salas y pegalo directo.'
+      );
+    } catch {
+      setArchiveStatusMsg('⚠️ Seleccioná el texto del cuadro inferior para copiarlo manualmente.');
+    }
+  };
+
+  // Descargar en un solo archivo (.txt) el Chat General o todas las Salas separadas por nombre
+  const handleDownloadArchiveFile = async (type) => {
+    if (!isAdmin) return;
+    try {
+      const nowStr = new Date().toLocaleString('es-AR');
+
+      if (type === 'general') {
+        const snap = await getDocs(query(collection(db, 'salas', 'chat-general', 'mensajes'), orderBy('createdAt', 'asc')));
+        const lines = snap.docs.map(d => {
+          const m = d.data();
+          const dateTxt = m.createdAt?.toDate ? m.createdAt.toDate().toLocaleString('es-AR') : 'Reciente';
+          return `[${dateTxt}] ${m.sender} (${m.email}): ${m.text}`;
+        });
+        const content = `=== JIFADECS 2027 - CHAT GENERAL INTERDISCIPLINARIO ===\nFecha de corte: ${nowStr}\n\n` + (lines.join('\n') || 'Sin mensajes.');
+        const blob = new Blob([content], { type: 'text/plain;charset=utf-8' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `Chat_General_Interdisciplinario_JIFADECS2027.txt`;
+        a.click();
+        URL.revokeObjectURL(url);
+      } else {
+        const roomPromises = roomsList.map(async (rm) => {
+          const rmSnap = await getDocs(query(collection(db, 'salas', rm.id, 'mensajes'), orderBy('createdAt', 'asc')));
+          const rmLines = rmSnap.docs.map(d => {
+            const m = d.data();
+            const dateTxt = m.createdAt?.toDate ? m.createdAt.toDate().toLocaleString('es-AR') : 'Reciente';
+            return `[${dateTxt}] ${m.sender} (${m.email}): ${m.text}`;
+          });
+          return `============================================================\nSALA: ${rm.name.toUpperCase()}\n============================================================\n` + (rmLines.join('\n') || 'Sin mensajes en esta sala.');
+        });
+        const roomsBlocks = await Promise.all(roomPromises);
+        const content = `=== JIFADECS 2027 - CHAT DE SALAS DE DEBATE (UNIFICADO POR SALA) ===\nFecha de corte: ${nowStr}\n\n` + roomsBlocks.join('\n\n\n');
+        const blob = new Blob([content], { type: 'text/plain;charset=utf-8' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `Chat_de_Salas_de_Debate_JIFADECS2027.txt`;
+        a.click();
+        URL.revokeObjectURL(url);
+      }
+    } catch (err) {
+      console.error('Error al generar descarga de debates:', err);
+    }
+  };
+
+  // 5. Busqueda de noticias con cache persistente en localStorage, control de concurrencia y timeout de 8s
+  const fetchLiveNews = async (forceRefresh = false) => {
+    if (rssFetchingRef.current) return;
+
+    const now = Date.now();
+    if (!forceRefresh) {
+      try {
+        const rawCache = localStorage.getItem(NEWS_STORAGE_KEY);
+        if (rawCache) {
+          const parsedCache = JSON.parse(rawCache);
+          if (
+            parsedCache &&
+            Number(parsedCache.timestamp) > 0 &&
+            now - Number(parsedCache.timestamp) < NEWS_CACHE_TTL_MS &&
+            Array.isArray(parsedCache.items) &&
+            parsedCache.items.length > 0
+          ) {
+            setNewsList(parsedCache.items);
+            return;
+          }
+        }
+      } catch {
+        // Si falla la lectura de localStorage, continuar con fetch normal
+      }
+    }
+
+    rssFetchingRef.current = true;
     setLoadingNews(true);
+
     try {
       const promises = thematicFeeds.map(async (feed) => {
-        const apiUrl = `https://api.rss2json.com/v1/api.json?rss_url=${encodeURIComponent(feed.rss)}`;
-        const res = await fetch(apiUrl);
-        if (!res.ok) return [];
-        const data = await res.json();
-        if (!data.items || !Array.isArray(data.items)) return [];
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 8000);
 
-        const parsedArticles = [];
-        for (const item of data.items) {
-          const candidateUrl = extractRealUrlFromHtml(item.description, item.link);
-          const directLink = getDirectArticleUrl(candidateUrl);
-          if (!directLink) continue;
+        try {
+          const apiUrl = `https://api.rss2json.com/v1/api.json?rss_url=${encodeURIComponent(feed.rss)}`;
+          const res = await fetch(apiUrl, { signal: controller.signal });
+          clearTimeout(timeoutId);
 
-          const rawTitle = typeof item.title === 'string' ? item.title.trim() : '';
-          if (!rawTitle) continue;
+          if (!res.ok) return [];
+          const data = await res.json();
+          if (!data.items || !Array.isArray(data.items)) return [];
 
-          const titleParts = rawTitle.split(' - ');
-          const cleanTitle = titleParts.length > 1 ? titleParts.slice(0, -1).join(' - ').trim() : rawTitle;
-          const extractedSource = titleParts.length > 1 ? titleParts[titleParts.length - 1].trim() : (item.author || '');
-          const sourceName = resolveSourceFromUrl(directLink, extractedSource);
+          const parsedArticles = [];
+          for (const item of data.items) {
+            const candidateUrl = extractRealUrlFromHtml(item.description, item.link);
+            const directLink = getDirectArticleUrl(candidateUrl);
+            if (!directLink) continue;
 
-          const rawCleanDesc = stripHtml(item.description || '');
-          const realDesc = normalizeText(rawCleanDesc) === normalizeText(cleanTitle) ? '' : rawCleanDesc;
+            const rawTitle = typeof item.title === 'string' ? item.title.trim() : '';
+            if (!rawTitle) continue;
 
-          if (!matchesCategoryStrictly(cleanTitle, realDesc, sourceName, feed.tag)) {
-            continue;
+            const titleParts = rawTitle.split(' - ');
+            const cleanTitle = titleParts.length > 1 ? titleParts.slice(0, -1).join(' - ').trim() : rawTitle;
+            const extractedSource = titleParts.length > 1 ? titleParts[titleParts.length - 1].trim() : (item.author || '');
+            const sourceName = resolveSourceFromUrl(directLink, extractedSource);
+
+            const rawCleanDesc = stripHtml(item.description || '');
+            const realDesc = normalizeText(rawCleanDesc) === normalizeText(cleanTitle) ? '' : rawCleanDesc;
+
+            if (!matchesCategoryStrictly(cleanTitle, realDesc, sourceName, feed.tag)) {
+              continue;
+            }
+
+            const displaySnippet = realDesc.length > 30
+              ? realDesc.slice(0, 165) + '...'
+              : `Nota de ${sourceName} sobre ${feed.tag} en Río Negro y Neuquén.`;
+
+            parsedArticles.push({
+              id: createDeterministicHash(`${feed.tag}-${cleanTitle}-${directLink}`),
+              tag: feed.tag,
+              title: cleanTitle,
+              date: item.pubDate ? new Date(item.pubDate).toLocaleDateString('es-AR', { day: 'numeric', month: 'short', year: 'numeric' }) : 'Actualidad',
+              source: sourceName,
+              url: directLink,
+              snippet: displaySnippet
+            });
+
+            if (parsedArticles.length >= 3) break;
           }
-
-          const displaySnippet = realDesc.length > 30
-            ? realDesc.slice(0, 165) + '...'
-            : `Nota de ${sourceName} sobre ${feed.tag} en Río Negro y Neuquén.`;
-
-          parsedArticles.push({
-            id: createDeterministicHash(`${feed.tag}-${cleanTitle}-${directLink}`),
-            tag: feed.tag,
-            title: cleanTitle,
-            date: item.pubDate ? new Date(item.pubDate).toLocaleDateString('es-AR', { day: 'numeric', month: 'short', year: 'numeric' }) : 'Actualidad',
-            source: sourceName,
-            url: directLink,
-            snippet: displaySnippet
-          });
-
-          if (parsedArticles.length >= 3) break;
+          return parsedArticles;
+        } catch {
+          clearTimeout(timeoutId);
+          return [];
         }
-        return parsedArticles;
       });
 
       const results = await Promise.all(promises);
@@ -540,11 +1100,18 @@ const FadecsWorkspace = () => {
       }
 
       setNewsList(mergedList);
-      lastFetchTimeRef.current = Date.now();
+      try {
+        localStorage.setItem(NEWS_STORAGE_KEY, JSON.stringify({
+          timestamp: Date.now(),
+          items: mergedList
+        }));
+      } catch {
+        // Ignorar si el almacenamiento local esta lleno
+      }
     } catch (err) {
-      console.error('Error al actualizar feeds tematicos, manteniendo base metodologica:', err);
-      setNewsList(fallbackNews);
+      console.error('Error al actualizar feeds tematicos, manteniendo cache/base:', err);
     } finally {
+      rssFetchingRef.current = false;
       setLoadingNews(false);
     }
   };
@@ -555,42 +1122,66 @@ const FadecsWorkspace = () => {
     }
   }, [currentView]);
 
-  // 5. Sincronizacion de Chat y Documentos por Sala
+  // 6. Sincronizacion de metadatos de la Sala (solo si el usuario tiene acceso a esa sala)
   useEffect(() => {
-    if (!user || currentView === 'noticias') return;
+    if (!user || !currentView.startsWith('sala-') || !hasRoomAccess) {
+      setRoomAllowedEmails([]);
+      setActiveDocUrl('');
+      return;
+    }
     setDocError('');
 
-    const q = query(collection(db, 'salas', currentView, 'mensajes'), orderBy('createdAt', 'asc'));
+    const unsubDoc = onSnapshot(doc(db, 'salas', currentView), (docSnap) => {
+      if (docSnap.exists()) {
+        const data = docSnap.data();
+        const storedUrl = data.docUrl || '';
+        setActiveDocUrl(isValidGoogleUrl(storedUrl) ? storedUrl : '');
+        const allowed = Array.isArray(data.allowedEmails)
+          ? data.allowedEmails.map(e => String(e).toLowerCase().trim())
+          : [];
+        setRoomAllowedEmails(allowed);
+      } else {
+        setActiveDocUrl('');
+        setRoomAllowedEmails([]);
+      }
+    });
+
+    return () => unsubDoc();
+  }, [currentView, user, hasRoomAccess]);
+
+  // 7. Sincronizacion de Mensajes optimizada
+  useEffect(() => {
+    if (!user) return;
+    if (currentView !== 'chat-general' && !currentView.startsWith('sala-')) return;
+    if (currentView.startsWith('sala-') && !hasRoomAccess) {
+      setMessages([]);
+      return;
+    }
+
+    const q = query(
+      collection(db, 'salas', currentView, 'mensajes'),
+      orderBy('createdAt', 'asc'),
+      limit(LIVE_CHAT_LIMIT)
+    );
+
     const unsubChat = onSnapshot(q, (snapshot) => {
       setMessages(snapshot.docs.map(docSnap => ({ id: docSnap.id, ...docSnap.data() })));
       setTimeout(() => chatEndRef.current?.scrollIntoView({ behavior: 'smooth' }), 100);
     });
 
-    let unsubDoc = () => {};
-    if (currentView.startsWith('sala-')) {
-      unsubDoc = onSnapshot(doc(db, 'salas', currentView), (docSnap) => {
-        if (docSnap.exists()) {
-          const storedUrl = docSnap.data().docUrl || '';
-          setActiveDocUrl(isValidGoogleUrl(storedUrl) ? storedUrl : '');
-        } else {
-          setActiveDocUrl('');
-        }
-      });
-    }
+    return () => unsubChat();
+  }, [currentView, user, hasRoomAccess]);
 
-    return () => { unsubChat(); unsubDoc(); };
-  }, [currentView, user]);
-
-  // Hacer scroll al fondo cuando se cambia a la pestaña de debate
   useEffect(() => {
     if (roomTab === 'chat') {
       setTimeout(() => chatEndRef.current?.scrollIntoView({ behavior: 'smooth' }), 100);
     }
   }, [roomTab]);
 
-  // 6. Enviar, Editar y Borrar Mensajes
+  // 8. Enviar, Editar y Borrar Mensajes
   const sendMessage = async (e) => {
     e.preventDefault();
+    if (!hasRoomAccess) return;
     const trimmed = newMessage.trim();
     if (!trimmed || trimmed.length > MAX_MSG_LENGTH || isSending) return;
 
@@ -643,6 +1234,7 @@ const FadecsWorkspace = () => {
 
   const handleDocSubmit = async (e) => {
     e.preventDefault();
+    if (!hasRoomAccess) return;
     const trimmedUrl = docInput.trim();
 
     if (!isValidGoogleUrl(trimmedUrl)) {
@@ -666,6 +1258,7 @@ const FadecsWorkspace = () => {
     setIsMobileMenuOpen(false);
     setEditingMsgId(null);
     setDocError('');
+    setArchiveStatusMsg('');
   };
 
   const categories = [
@@ -678,6 +1271,17 @@ const FadecsWorkspace = () => {
     'UNCo (Fiske Menuco / Neuquén)'
   ];
   const filteredNews = selectedCategory === 'Todas' ? newsList : newsList.filter(n => n.tag === selectedCategory);
+
+  const periods = [
+    'Todos',
+    'Néstor Kirchner y Cristina Fernández (2003-2015)',
+    'Mauricio Macri (2015-2019)',
+    'Alberto Fernández (2019-2023)',
+    'Javier Milei (2023-Presente)'
+  ];
+  const filteredNorms = selectedPeriod === 'Todos'
+    ? officialGazetteNorms
+    : officialGazetteNorms.filter(item => item.period === selectedPeriod);
 
   // PANTALLA DE LOGIN
   if (!user) {
@@ -717,7 +1321,8 @@ const FadecsWorkspace = () => {
         <div className="hidden md:block p-4 border-b border-orange-200 bg-orange-200/50">
           <h1 className="text-xl font-bold text-orange-800">JIFADECS 2027</h1>
           <p className="text-xs text-orange-700 mt-1 truncate">{user.displayName}</p>
-          <button onClick={logout} className="text-xs text-orange-500 hover:text-orange-800 mt-2 font-semibold">Cerrar sesión</button>
+          {isAdmin && <span className="inline-block mt-1 px-2 py-0.5 bg-orange-600 text-white text-[10px] font-bold rounded">Coordinación Autorizada</span>}
+          <button onClick={logout} className="block text-xs text-orange-500 hover:text-orange-800 mt-2 font-semibold">Cerrar sesión</button>
         </div>
 
         <div className="flex-1 overflow-y-auto p-4 space-y-4">
@@ -725,6 +1330,10 @@ const FadecsWorkspace = () => {
             <h2 className="text-xs font-semibold text-orange-500 uppercase tracking-wider mb-2">General</h2>
             <button onClick={() => selectView('chat-general')} className={`w-full text-left px-3 py-2.5 rounded-md transition-colors text-sm font-medium ${currentView === 'chat-general' ? 'bg-orange-500 text-white shadow' : 'hover:bg-orange-200 text-orange-800'}`}>💬 Chat General</button>
             <button onClick={() => selectView('noticias')} className={`w-full text-left px-3 py-2.5 rounded-md transition-colors mt-1 text-sm font-medium ${currentView === 'noticias' ? 'bg-orange-500 text-white shadow' : 'hover:bg-orange-200 text-orange-800'}`}>📰 Ejes y Noticias</button>
+            <button onClick={() => selectView('boletin-oficial')} className={`w-full text-left px-3 py-2.5 rounded-md transition-colors mt-1 text-sm font-medium ${currentView === 'boletin-oficial' ? 'bg-orange-500 text-white shadow' : 'hover:bg-orange-200 text-orange-800'}`}>📜 Boletín Oficial / DNU</button>
+            {isAdmin && (
+              <button onClick={() => selectView('registro-debates')} className={`w-full text-left px-3 py-2.5 rounded-md transition-colors mt-1 text-sm font-medium ${currentView === 'registro-debates' ? 'bg-orange-500 text-white shadow' : 'hover:bg-orange-200 text-orange-800'}`}>🗂️ Registro Debates (24h)</button>
+            )}
             <a
               href={DRIVE_REPO_URL}
               target="_blank"
@@ -736,24 +1345,68 @@ const FadecsWorkspace = () => {
             </a>
           </div>
 
-          <div>
-            <div className="flex items-center justify-between mb-2">
-              <h2 className="text-xs font-semibold text-orange-500 uppercase tracking-wider">Grupos de Trabajo</h2>
-              {isAdmin && (
-                <div className="flex space-x-1">
-                  <button onClick={() => updateRoomsCount(roomsCount - 1)} className="px-2.5 py-0.5 bg-orange-300 text-orange-900 rounded hover:bg-orange-400 font-bold">-</button>
-                  <button onClick={() => updateRoomsCount(roomsCount + 1)} className="px-2.5 py-0.5 bg-orange-300 text-orange-900 rounded hover:bg-orange-400 font-bold">+</button>
-                </div>
-              )}
+          {(isAdmin || visibleRooms.length > 0) && (
+            <div>
+              <div className="flex items-center justify-between mb-2">
+                <h2 className="text-xs font-semibold text-orange-500 uppercase tracking-wider">Grupos de Trabajo</h2>
+                {isAdmin && (
+                  <button
+                    onClick={handleAddRoom}
+                    title="Crear nueva sala de monografía"
+                    className="px-2 py-0.5 bg-orange-500 text-white rounded hover:bg-orange-600 text-xs font-bold shadow-sm"
+                  >
+                    + Sala
+                  </button>
+                )}
+              </div>
+              <div className="space-y-1.5">
+                {visibleRooms.map((rm) => (
+                  <div key={rm.id} className="flex flex-col gap-1">
+                    {editingRoomId === rm.id && isAdmin ? (
+                      <div className="flex items-center gap-1 bg-white p-1.5 rounded border border-orange-300">
+                        <input
+                          type="text"
+                          value={editingRoomName}
+                          onChange={(e) => setEditingRoomName(e.target.value)}
+                          className="w-full px-1.5 py-0.5 text-xs border border-orange-200 rounded outline-none"
+                          autoFocus
+                        />
+                        <button onClick={() => handleSaveRoomName(rm.id)} className="px-1.5 py-0.5 bg-orange-500 text-white text-[10px] font-bold rounded">OK</button>
+                        <button onClick={() => setEditingRoomId(null)} className="px-1.5 py-0.5 bg-gray-200 text-gray-700 text-[10px] rounded">✕</button>
+                      </div>
+                    ) : (
+                      <div className="flex items-center gap-1">
+                        <button
+                          onClick={() => selectView(rm.id)}
+                          className={`flex-1 text-left px-3 py-2 rounded-md transition-colors text-sm font-medium truncate ${currentView === rm.id ? 'bg-orange-500 text-white shadow' : 'hover:bg-orange-200 text-orange-800'}`}
+                        >
+                          📝 {rm.name}
+                        </button>
+                        {isAdmin && (
+                          <div className="flex items-center shrink-0">
+                            <button
+                              onClick={() => { setEditingRoomId(rm.id); setEditingRoomName(rm.name); }}
+                              title="Renombrar esta monografía"
+                              className="p-1 text-orange-700 hover:bg-orange-200 rounded text-xs"
+                            >
+                              ✏️
+                            </button>
+                            <button
+                              onClick={() => handleDeleteSpecificRoom(rm)}
+                              title="Eliminar esta monografía"
+                              className="p-1 text-red-600 hover:bg-red-100 rounded text-xs"
+                            >
+                              🗑️
+                            </button>
+                          </div>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                ))}
+              </div>
             </div>
-            <div className="space-y-1">
-              {Array.from({ length: roomsCount }).map((_, idx) => (
-                <button key={idx} onClick={() => selectView(`sala-${idx + 1}`)} className={`w-full text-left px-3 py-2.5 rounded-md transition-colors text-sm font-medium ${currentView === `sala-${idx + 1}` ? 'bg-orange-500 text-white shadow' : 'hover:bg-orange-200 text-orange-800'}`}>
-                  📝 Monografía {idx + 1}
-                </button>
-              ))}
-            </div>
-          </div>
+          )}
 
           <div className="md:hidden pt-4 border-t border-orange-200">
             <button onClick={logout} className="w-full text-left px-3 py-2 text-sm text-red-600 font-semibold">Cerrar sesión</button>
@@ -763,7 +1416,9 @@ const FadecsWorkspace = () => {
 
       {/* AREA PRINCIPAL */}
       <div className="flex-1 flex flex-col overflow-hidden h-full">
-        {currentView === 'noticias' ? (
+
+        {/* VISTA 1: EJES Y NOTICIAS REGIONALES */}
+        {currentView === 'noticias' && (
           <div className="flex-1 overflow-y-auto p-4 md:p-8 bg-orange-50/50">
             <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-4">
               <div>
@@ -789,7 +1444,6 @@ const FadecsWorkspace = () => {
               </div>
             </div>
 
-            {/* FILTROS POR EJE TEMATICO */}
             <div className="flex flex-wrap gap-2 mb-6 pb-2 border-b border-orange-200">
               {categories.map(cat => (
                 <button
@@ -818,11 +1472,257 @@ const FadecsWorkspace = () => {
               ))}
             </div>
           </div>
-        ) : (
+        )}
+
+        {/* VISTA 2: BOLETIN OFICIAL Y LEGISLACION HISTORICA (INFOLEG) */}
+        {currentView === 'boletin-oficial' && (
+          <div className="flex-1 overflow-y-auto p-4 md:p-8 bg-orange-50/50">
+            <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-4">
+              <div>
+                <h2 className="text-2xl md:text-3xl font-bold text-orange-800">Boletín Oficial y Legislación (InfoLEG)</h2>
+                <p className="text-xs md:text-sm text-orange-600 mt-1">
+                  Leyes, Decretos de Necesidad y Urgencia (DNU) y marcos normativos que transformaron las relaciones de poder, el trabajo y el territorio en Argentina.
+                </p>
+              </div>
+              <div className="flex flex-wrap gap-2">
+                <a
+                  href="https://www.boletinoficial.gob.ar/seccion/primera"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="px-3 py-2 bg-orange-200 text-orange-900 rounded-lg font-bold text-xs md:text-sm hover:bg-orange-300 transition-colors"
+                >
+                  📜 Boletín Oficial del Día ↗
+                </a>
+                <a
+                  href="https://www.argentina.gob.ar/normativa"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="px-4 py-2 bg-orange-500 text-white rounded-lg font-bold text-xs md:text-sm hover:bg-orange-600 shadow transition-colors"
+                >
+                  ⚖️ Buscador Nacional InfoLEG ↗
+                </a>
+              </div>
+            </div>
+
+            <div className="flex flex-wrap gap-2 mb-6 pb-2 border-b border-orange-200">
+              {periods.map(per => (
+                <button
+                  key={per}
+                  onClick={() => setSelectedPeriod(per)}
+                  className={`px-3 py-1.5 rounded-full text-xs font-bold transition-colors ${selectedPeriod === per ? 'bg-orange-600 text-white shadow-sm' : 'bg-orange-100 text-orange-800 hover:bg-orange-200'}`}
+                >
+                  {per}
+                </button>
+              ))}
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4 md:gap-6">
+              {filteredNorms.map(item => (
+                <div key={item.id} className="bg-white p-4 md:p-6 rounded-lg shadow-sm border border-orange-100 hover:shadow-md transition-shadow flex flex-col justify-between">
+                  <div>
+                    <div className="flex flex-wrap items-center justify-between gap-2 mb-2">
+                      <span className="inline-block px-2.5 py-0.5 bg-orange-600 text-white text-[11px] font-bold rounded">{item.normType}</span>
+                      <span className="text-[11px] text-orange-700 font-semibold">{item.period}</span>
+                    </div>
+                    <h3 className="text-base md:text-lg font-bold text-orange-900 mb-2 leading-snug">{item.title}</h3>
+                    <p className="text-orange-700 text-xs md:text-sm mb-3">{item.summary}</p>
+                    <span className="inline-block px-2 py-0.5 bg-orange-100 text-orange-800 text-[10px] font-bold rounded mb-3">
+                      Eje vinculado: {item.axis} • Promulgación/Publicación: {item.date}
+                    </span>
+                  </div>
+                  <a
+                    href={item.url}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="text-orange-600 font-bold text-xs md:text-sm hover:text-orange-800 self-start"
+                  >
+                    Ver texto oficial completo en InfoLEG / Boletín Oficial →
+                  </a>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* VISTA 3: REPOSITORIO Y REGISTRO DE DEBATES CADA 24 HORAS (SOLO VISIBLE Y EJECUTABLE POR CUENTAS AUTORIZADAS) */}
+        {currentView === 'registro-debates' && isAdmin && (
+          <div className="flex-1 overflow-y-auto p-4 md:p-8 bg-orange-50/50">
+            <div className="max-w-4xl mx-auto space-y-6">
+              <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+                <div>
+                  <h2 className="text-2xl md:text-3xl font-bold text-orange-800">Repositorio de Debates (Registro cada 24 hs)</h2>
+                  <p className="text-xs md:text-sm text-orange-600 mt-1">
+                    Tus dos documentos de Google Docs ya están integrados en el código base. Podés abrirlos directo, copiar el registro con 1 toque desde el celular o leerlo acá mismo.
+                  </p>
+                </div>
+                <div className="flex flex-wrap gap-2">
+                  <button
+                    onClick={() => runDebateArchiveSync(true)}
+                    disabled={isSyncingArchive}
+                    className="px-3 py-2 bg-orange-600 text-white rounded-lg font-bold text-xs md:text-sm hover:bg-orange-700 shadow disabled:opacity-50"
+                  >
+                    {isSyncingArchive ? '🔄 Actualizando...' : '🔄 Actualizar Registro 24h Ahora'}
+                  </button>
+                  <a
+                    href={CHATS_FOLDER_URL}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="px-3 py-2 bg-orange-200 text-orange-900 rounded-lg font-bold text-xs md:text-sm hover:bg-orange-300"
+                  >
+                    📁 Carpeta Drive ↗
+                  </a>
+                </div>
+              </div>
+
+              {archiveStatusMsg && (
+                <div className="p-3 bg-orange-100 border border-orange-300 text-orange-900 text-xs md:text-sm font-semibold rounded-lg shadow-sm">
+                  {archiveStatusMsg}
+                </div>
+              )}
+
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div className="bg-white p-5 rounded-xl border border-orange-200 shadow-sm flex flex-col justify-between">
+                  <div>
+                    <span className="inline-block px-2.5 py-0.5 bg-orange-100 text-orange-800 text-xs font-bold rounded-full mb-2">Documento 1 (Fijo en código)</span>
+                    <h3 className="text-lg font-bold text-orange-900 mb-1">Chat General Interdisciplinario</h3>
+                    <p className="text-xs text-orange-700 mb-4">
+                      Historial cronológico de todas las intervenciones del Chat Principal.
+                    </p>
+                  </div>
+                  <div className="flex flex-col gap-2">
+                    <a
+                      href={DEFAULT_GENERAL_CHAT_DOC_URL}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="w-full py-2.5 px-4 bg-orange-500 text-white rounded-lg font-bold text-xs md:text-sm text-center hover:bg-orange-600 shadow-sm"
+                    >
+                      📄 Abrir Google Doc de Chat General ↗
+                    </a>
+                    <button
+                      onClick={() => handleCopyArchiveToClipboard('general')}
+                      className="w-full py-2 px-3 bg-orange-200 text-orange-900 rounded-lg font-bold text-xs hover:bg-orange-300"
+                    >
+                      📋 Copiar registro al portapapeles (para celular)
+                    </button>
+                    <button
+                      onClick={() => handleDownloadArchiveFile('general')}
+                      className="w-full py-2 px-3 bg-orange-100 text-orange-800 rounded-lg font-semibold text-xs hover:bg-orange-200"
+                    >
+                      ⬇️ Descargar archivo (.txt)
+                    </button>
+                  </div>
+                </div>
+
+                <div className="bg-white p-5 rounded-xl border border-orange-200 shadow-sm flex flex-col justify-between">
+                  <div>
+                    <span className="inline-block px-2.5 py-0.5 bg-orange-100 text-orange-800 text-xs font-bold rounded-full mb-2">Documento 2 (Unificado por Sala)</span>
+                    <h3 className="text-lg font-bold text-orange-900 mb-1">Chat de Salas de Debate</h3>
+                    <p className="text-xs text-orange-700 mb-4">
+                      Reúne en un solo documento los debates de todas las monografías separados por el nombre de cada sala.
+                    </p>
+                  </div>
+                  <div className="flex flex-col gap-2">
+                    <a
+                      href={DEFAULT_SALAS_CHAT_DOC_URL}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="w-full py-2.5 px-4 bg-orange-500 text-white rounded-lg font-bold text-xs md:text-sm text-center hover:bg-orange-600 shadow-sm"
+                    >
+                      📄 Abrir Google Doc de Salas de Debate ↗
+                    </a>
+                    <button
+                      onClick={() => handleCopyArchiveToClipboard('salas')}
+                      className="w-full py-2 px-3 bg-orange-200 text-orange-900 rounded-lg font-bold text-xs hover:bg-orange-300"
+                    >
+                      📋 Copiar todas las Salas al portapapeles (celular)
+                    </button>
+                    <button
+                      onClick={() => handleDownloadArchiveFile('salas')}
+                      className="w-full py-2 px-3 bg-orange-100 text-orange-800 rounded-lg font-semibold text-xs hover:bg-orange-200"
+                    >
+                      ⬇️ Descargar corte unificado (.txt)
+                    </button>
+                  </div>
+                </div>
+              </div>
+
+              <div className="bg-white rounded-xl border border-orange-200 shadow-sm overflow-hidden">
+                <div className="flex border-b border-orange-200 bg-orange-100">
+                  <button
+                    onClick={() => setArchivePreviewTab('general')}
+                    className={`flex-1 py-2.5 text-xs font-bold text-center border-b-2 ${archivePreviewTab === 'general' ? 'border-orange-600 text-orange-900 bg-white' : 'border-transparent text-orange-700'}`}
+                  >
+                    👁️ Vista Previa: Chat General
+                  </button>
+                  <button
+                    onClick={() => setArchivePreviewTab('salas')}
+                    className={`flex-1 py-2.5 text-xs font-bold text-center border-b-2 ${archivePreviewTab === 'salas' ? 'border-orange-600 text-orange-900 bg-white' : 'border-transparent text-orange-700'}`}
+                  >
+                    👁️ Vista Previa: Salas (Separadas por Nombre)
+                  </button>
+                </div>
+                <div className="p-4">
+                  <div className="flex items-center justify-between mb-2">
+                    <span className="text-[11px] text-orange-600 font-semibold">
+                      Último corte automático 24h: {lastArchiveSyncMs ? new Date(lastArchiveSyncMs).toLocaleString('es-AR') : 'Tocá "Actualizar Registro 24h Ahora" para generar el primer corte'}
+                    </span>
+                  </div>
+                  <pre className="w-full max-h-80 overflow-y-auto p-3 bg-orange-50/70 border border-orange-200 rounded text-[11px] md:text-xs text-orange-950 whitespace-pre-wrap font-mono leading-relaxed">
+                    {archivePreviewTab === 'general'
+                      ? (compiledGeneralText || 'Todavía no se generó la vista previa. Tocá el botón "🔄 Actualizar Registro 24h Ahora" arriba.')
+                      : (compiledSalasText || 'Todavía no se generó la vista previa. Tocá el botón "🔄 Actualizar Registro 24h Ahora" arriba.')}
+                  </pre>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* VISTA 4: SALAS DE MONOGRAFIA (SOLO SI TIENE ACCESO, SIN CARTELES DE BLOQUEO) Y CHAT GENERAL */}
+        {(currentView === 'chat-general' || (isCurrentRoomView && hasRoomAccess)) && (
           <div className="flex-1 flex flex-col h-full overflow-hidden">
 
+            {/* PANEL DE GESTION DE INTEGRANTES DE LA SALA (SOLO VISIBLE PARA CUENTAS AUTORIZADAS) */}
+            {isCurrentRoomView && isAdmin && (
+              <div className="bg-orange-200/70 border-b border-orange-300 px-3 py-2 shrink-0">
+                <div className="flex flex-col md:flex-row md:items-center justify-between gap-2">
+                  <div className="flex flex-wrap items-center gap-1.5">
+                    <span className="text-xs font-bold text-orange-900">🔒 Integrantes con visibilidad en {currentRoomObj?.name || currentView}:</span>
+                    {effectiveAllowedEmails.length === 0 ? (
+                      <span className="text-[11px] text-orange-700 italic">Oculta para otros usuarios (agregá correos para que les aparezca esta sala)</span>
+                    ) : (
+                      effectiveAllowedEmails.map(emailItem => (
+                        <span key={emailItem} className="inline-flex items-center gap-1 px-2 py-0.5 bg-white text-orange-900 rounded-full text-[11px] border border-orange-300">
+                          {emailItem}
+                          <button
+                            onClick={() => handleRemoveAllowedEmail(emailItem)}
+                            title="Ocultar sala para este correo"
+                            className="text-red-600 font-bold hover:text-red-800"
+                          >
+                            ✕
+                          </button>
+                        </span>
+                      ))
+                    )}
+                  </div>
+                  <form onSubmit={handleAddAllowedEmail} className="flex gap-1.5 shrink-0">
+                    <input
+                      type="email"
+                      value={newAllowedEmailInput}
+                      onChange={(e) => setNewAllowedEmailInput(e.target.value)}
+                      placeholder="correo@ejemplo.com"
+                      className="px-2.5 py-1 text-xs bg-white border border-orange-300 rounded outline-none"
+                    />
+                    <button type="submit" className="px-3 py-1 bg-orange-600 text-white text-xs font-bold rounded hover:bg-orange-700">
+                      + Habilitar Sala
+                    </button>
+                  </form>
+                </div>
+              </div>
+            )}
+
             {/* SELECTOR DE PESTAÑAS EN TODOS LOS DISPOSITIVOS (PC Y MOVIL) */}
-            {currentView.startsWith('sala-') && (
+            {isCurrentRoomView && (
               <div className="flex border-b border-orange-200 bg-orange-100 shrink-0">
                 <button
                   onClick={() => setRoomTab('doc')}
@@ -840,7 +1740,7 @@ const FadecsWorkspace = () => {
             )}
 
             {/* ZONA DE DOCUMENTO (PESTAÑA DOCUMENTO EN TODOS LOS DISPOSITIVOS) */}
-            {currentView.startsWith('sala-') && roomTab === 'doc' && (
+            {isCurrentRoomView && roomTab === 'doc' && (
               <div className="flex flex-1 flex-col bg-white h-full overflow-hidden">
                 <div className="p-3 md:p-4 bg-orange-100/30 border-b border-orange-200">
                   <div className="bg-yellow-50 border-l-4 border-yellow-400 p-2 mb-2.5 flex flex-col sm:flex-row sm:items-center justify-between gap-2">
@@ -888,11 +1788,11 @@ const FadecsWorkspace = () => {
             )}
 
             {/* ZONA DE CHAT (PESTAÑA DEBATE EN SALAS O VISTA DE CHAT GENERAL) */}
-            {(currentView === 'chat-general' || (currentView.startsWith('sala-') && roomTab === 'chat')) && (
+            {(currentView === 'chat-general' || (isCurrentRoomView && roomTab === 'chat')) && (
               <div className="w-full max-w-4xl mx-auto md:my-6 md:rounded-xl md:shadow-lg md:border flex-1 bg-white flex flex-col border-orange-200 h-full overflow-hidden">
                 <div className="p-3 md:p-4 border-b border-orange-200 bg-orange-100/50 flex justify-between items-center">
-                  <h3 className="font-bold text-orange-800 text-sm md:text-base capitalize">
-                    {currentView === 'chat-general' ? 'Chat General Interdisciplinario' : `Debate - ${currentView.replace('-', ' ')}`}
+                  <h3 className="font-bold text-orange-800 text-sm md:text-base">
+                    {currentView === 'chat-general' ? 'Chat General Interdisciplinario' : `Debate - ${currentRoomObj?.name || currentView}`}
                   </h3>
                 </div>
 
@@ -909,7 +1809,7 @@ const FadecsWorkspace = () => {
 
                           {(isMine || isAdmin) && editingMsgId !== msg.id && (
                             <div className="flex items-center gap-1.5 opacity-80 hover:opacity-100">
-                              {isMine && (
+                              {(isMine || isAdmin) && (
                                 <button onClick={() => startEditMessage(msg)} title="Editar mensaje" className="hover:scale-110 transition-transform text-[11px]">
                                   ✏️
                                 </button>
