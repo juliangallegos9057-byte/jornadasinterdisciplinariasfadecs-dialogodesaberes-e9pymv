@@ -1,0 +1,37 @@
+name: Sincronizar Base InfoLEG
+
+on:
+  schedule:
+    # Se ejecuta automáticamente todos los días a las 06:00 AM UTC (03:00 AM Argentina)
+    - cron: '0 6 * * *'
+  workflow_dispatch: # Te permite ejecutarlo manualmente desde la pestaña "Actions" en GitHub
+
+permissions:
+  contents: write
+
+jobs:
+  actualizar-datos:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Descargar código del repositorio
+        uses: actions/checkout@v4
+
+      - name: Configurar Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Instalar dependencias necesarias
+        run: pip install pandas requests
+
+      - name: Descargar y filtrar los 3 CSV de InfoLEG
+        run: python scripts/procesar_infoleg.py
+
+      - name: Guardar archivos livianos en el repositorio
+        run: |
+          git config --local user.email "github-actions[bot]@users.noreply.github.com"
+          git config --local user.name "github-actions[bot]"
+          git add public/data/
+          git diff --staged --quiet || git commit -m "chore: actualizar base legislativa InfoLEG"
+          git push
