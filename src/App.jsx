@@ -681,12 +681,82 @@ const FadecsWorkspace = () => {
   const [loadingNews, setLoadingNews] = useState(false);
   const [selectedPeriod, setSelectedPeriod] = useState('Todos');
 
+  // Estados de carga bajo demanda para los 3 CSV procesados de InfoLEG
+  const [selectedGazetteAxis, setSelectedGazetteAxis] = useState('Todas');
+  const [gazetteSearch, setGazetteSearch] = useState('');
+  const [infolegExtraNorms, setInfolegExtraNorms] = useState([]);
+  const [infolegLoaded, setInfolegLoaded] = useState(false);
+  const [loadingInfoleg, setLoadingInfoleg] = useState(false);
+  const [infolegRelations, setInfolegRelations] = useState(null);
+  const [loadingRelations, setLoadingRelations] = useState(false);
+  const [expandedNormId, setExpandedNormId] = useState(null);
+
   const chatEndRef = useRef(null);
   const archiveRunningRef = useRef(false);
   const rssFetchingRef = useRef(false);
 
   const userEmailLower = user?.email ? user.email.toLowerCase().trim() : '';
   const isAdmin = ADMIN_EMAILS.includes(userEmailLower);
+
+  // Descarga /data/infoleg-busqueda.json SOLO cuando el usuario interactua con el buscador o boton
+  const loadInfolegOnDemand = async () => {
+    if (infolegLoaded || loadingInfoleg) return;
+    setLoadingInfoleg(true);
+    try {
+      const res = await fetch('/data/infoleg-busqueda.json');
+      if (res.ok) {
+        const data = await res.json();
+        if (Array.isArray(data)) {
+          const mapped = data.map((n) => ({
+            id: `infoleg-${n.id_norma}`,
+            rawId: String(n.id_norma),
+            period: n.period || 'Otros Períodos',
+            normType: `${n.tipo_norma || 'Norma'} ${n.numero_norma || ''}`.trim(),
+            title: n.titulo_resumido || n.titulo_sumario || 'Norma Nacional',
+            date: n.fecha_sancion || 'S/F',
+            axis: n.axis || 'Todas',
+            summary: n.texto_resumido || n.titulo_sumario || 'Sin resumen disponible.',
+            url: n.texto_actualizado || n.texto_original || 'https://www.argentina.gob.ar/normativa',
+            boUrl: n.texto_original || '',
+            modificaCount: Number(n.modifica_a) || 0,
+            modificadaPorCount: Number(n.modificada_por) || 0
+          }));
+          setInfolegExtraNorms(mapped);
+        }
+      }
+      setInfolegLoaded(true);
+    } catch (err) {
+      console.error('Error al cargar base InfoLEG bajo demanda:', err);
+    } finally {
+      setLoadingInfoleg(false);
+    }
+  };
+
+  // Descarga /data/infoleg-relaciones.json SOLO cuando el usuario pide ver las leyes vinculadas de una norma
+  const toggleNormRelations = async (rawId) => {
+    if (!rawId) return;
+    if (expandedNormId === rawId) {
+      setExpandedNormId(null);
+      return;
+    }
+    setExpandedNormId(rawId);
+    if (!infolegRelations && !loadingRelations) {
+      setLoadingRelations(true);
+      try {
+        const res = await fetch('/data/infoleg-relaciones.json');
+        if (res.ok) {
+          const data = await res.json();
+          setInfolegRelations(data || {});
+        } else {
+          setInfolegRelations({});
+        }
+      } catch {
+        setInfolegRelations({});
+      } finally {
+        setLoadingRelations(false);
+      }
+    }
+  };
 
   // Filtrado de visibilidad silencioso: cada usuario solo ve las salas donde su correo esta habilitado
   const visibleRooms = isAdmin
@@ -1296,9 +1366,20 @@ const FadecsWorkspace = () => {
     'Alberto Fernández (2019-2023)',
     'Javier Milei (2023-Presente)'
   ];
-  const filteredNorms = selectedPeriod === 'Todos'
-    ? officialGazetteNorms
-    : officialGazetteNorms.filter(item => item.period === selectedPeriod);
+
+  const combinedGazetteNorms = infolegLoaded
+    ? [...officialGazetteNorms, ...infolegExtraNorms]
+    : officialGazetteNorms;
+
+  const filteredNorms = combinedGazetteNorms.filter((item) => {
+    const matchPeriod = selectedPeriod === 'Todos' || item.period === selectedPeriod;
+    const matchAxis = selectedGazetteAxis === 'Todas' || item.axis === selectedGazetteAxis;
+    const q = normalizeText(gazetteSearch.trim());
+    const matchSearch =
+      !q ||
+      normalizeText(`${item.normType} ${item.title} ${item.summary} ${item.axis}`).includes(q);
+    return matchPeriod && matchAxis && matchSearch;
+  }).slice(0, 40);
 
   // PANTALLA DE LOGIN
   if (!user) {
@@ -1491,17 +1572,26 @@ const FadecsWorkspace = () => {
           </div>
         )}
 
-        {/* VISTA 2: BOLETIN OFICIAL Y LEGISLACION HISTORICA (INFOLEG MODERNO) */}
+        {/* VISTA 2: BOLETIN OFICIAL Y LEGISLACION HISTORICA (INFOLEG MODERNO + BASE CSV BAJO DEMANDA) */}
         {currentView === 'boletin-oficial' && (
           <div className="flex-1 overflow-y-auto p-4 md:p-8 bg-orange-50/50">
             <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-4">
               <div>
                 <h2 className="text-2xl md:text-3xl font-bold text-orange-800">Boletín Oficial y Legislación (InfoLEG)</h2>
                 <p className="text-xs md:text-sm text-orange-600 mt-1">
-                  Leyes, Decretos de Necesidad y Urgencia (DNU) y marcos normativos que transformaron las relaciones de poder, el trabajo y el territorio en Argentina.
+                  Leyes, Decretos de Necesidad y Urgencia (DNU) y marcos normativos vinculados a los ejes temáticos de las Jornadas.
                 </p>
               </div>
               <div className="flex flex-wrap gap-2">
+                {!infolegLoaded && (
+                  <button
+                    onClick={loadInfolegOnDemand}
+                    disabled={loadingInfoleg}
+                    className="px-3 py-2 bg-orange-600 text-white rounded-lg font-bold text-xs md:text-sm hover:bg-orange-700 shadow transition-colors disabled:opacity-50"
+                  >
+                    {loadingInfoleg ? '🔄 Cargando base CSV...' : '📥 Cargar Base Completa InfoLEG'}
+                  </button>
+                )}
                 <a
                   href="https://www.boletinoficial.gob.ar/seccion/primera"
                   target="_blank"
@@ -1521,12 +1611,41 @@ const FadecsWorkspace = () => {
               </div>
             </div>
 
+            {/* BUSCADOR BAJO DEMANDA: SOLO DESCARGA LOS ARCHIVOS AL INTERACTUAR */}
+            <div className="mb-4">
+              <input
+                type="search"
+                value={gazetteSearch}
+                onFocus={loadInfolegOnDemand}
+                onChange={(e) => {
+                  setGazetteSearch(e.target.value);
+                  if (!infolegLoaded) loadInfolegOnDemand();
+                }}
+                placeholder="Buscar por número de Ley/DNU o palabra clave (carga la base actualizada al escribir)..."
+                className="w-full px-4 py-2.5 bg-white border border-orange-300 rounded-lg text-xs md:text-sm text-orange-900 focus:ring-2 focus:ring-orange-400 outline-none shadow-sm"
+              />
+            </div>
+
+            {/* FILTRO POR TITULOS / EJES METODOLOGICOS DE LAS JORNADAS */}
+            <div className="flex flex-wrap gap-2 mb-3">
+              {categories.map(cat => (
+                <button
+                  key={cat}
+                  onClick={() => setSelectedGazetteAxis(cat)}
+                  className={`px-3 py-1.5 rounded-full text-xs font-bold transition-colors ${selectedGazetteAxis === cat ? 'bg-orange-600 text-white shadow-sm' : 'bg-orange-100 text-orange-800 hover:bg-orange-200'}`}
+                >
+                  {cat}
+                </button>
+              ))}
+            </div>
+
+            {/* FILTRO POR PERIODO PRESIDENCIAL */}
             <div className="flex flex-wrap gap-2 mb-6 pb-2 border-b border-orange-200">
               {periods.map(per => (
                 <button
                   key={per}
                   onClick={() => setSelectedPeriod(per)}
-                  className={`px-3 py-1.5 rounded-full text-xs font-bold transition-colors ${selectedPeriod === per ? 'bg-orange-600 text-white shadow-sm' : 'bg-orange-100 text-orange-800 hover:bg-orange-200'}`}
+                  className={`px-3 py-1 rounded-full text-[11px] font-semibold transition-colors ${selectedPeriod === per ? 'bg-orange-800 text-white shadow-sm' : 'bg-orange-200/70 text-orange-900 hover:bg-orange-200'}`}
                 >
                   {per}
                 </button>
@@ -1534,41 +1653,85 @@ const FadecsWorkspace = () => {
             </div>
 
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4 md:gap-6">
-              {filteredNorms.map(item => (
-                <div key={item.id} className="bg-white p-4 md:p-6 rounded-lg shadow-sm border border-orange-100 hover:shadow-md transition-shadow flex flex-col justify-between">
-                  <div>
-                    <div className="flex flex-wrap items-center justify-between gap-2 mb-2">
-                      <span className="inline-block px-2.5 py-0.5 bg-orange-600 text-white text-[11px] font-bold rounded">{item.normType}</span>
-                      <span className="text-[11px] text-orange-700 font-semibold">{item.period}</span>
+              {filteredNorms.map(item => {
+                const rel = item.rawId && infolegRelations ? infolegRelations[item.rawId] : null;
+                const isExpanded = item.rawId && expandedNormId === item.rawId;
+
+                return (
+                  <div key={item.id} className="bg-white p-4 md:p-6 rounded-lg shadow-sm border border-orange-100 hover:shadow-md transition-shadow flex flex-col justify-between">
+                    <div>
+                      <div className="flex flex-wrap items-center justify-between gap-2 mb-2">
+                        <span className="inline-block px-2.5 py-0.5 bg-orange-600 text-white text-[11px] font-bold rounded">{item.normType}</span>
+                        <span className="text-[11px] text-orange-700 font-semibold">{item.period}</span>
+                      </div>
+                      <h3 className="text-base md:text-lg font-bold text-orange-900 mb-2 leading-snug">{item.title}</h3>
+                      <p className="text-orange-700 text-xs md:text-sm mb-3">{item.summary}</p>
+                      <span className="inline-block px-2 py-0.5 bg-orange-100 text-orange-800 text-[10px] font-bold rounded mb-4">
+                        Eje vinculado: {item.axis} • Promulgación/Publicación: {item.date}
+                      </span>
                     </div>
-                    <h3 className="text-base md:text-lg font-bold text-orange-900 mb-2 leading-snug">{item.title}</h3>
-                    <p className="text-orange-700 text-xs md:text-sm mb-3">{item.summary}</p>
-                    <span className="inline-block px-2 py-0.5 bg-orange-100 text-orange-800 text-[10px] font-bold rounded mb-4">
-                      Eje vinculado: {item.axis} • Promulgación/Publicación: {item.date}
-                    </span>
+
+                    <div>
+                      <div className="flex flex-wrap items-center gap-2 pt-2 border-t border-orange-100">
+                        <a
+                          href={item.url}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="px-3 py-1.5 bg-orange-500 text-white rounded-md font-bold text-xs hover:bg-orange-600 shadow-sm transition-colors"
+                        >
+                          ⚖️ Texto completo en InfoLEG ↗
+                        </a>
+                        {item.boUrl && (
+                          <a
+                            href={item.boUrl}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="px-3 py-1.5 bg-orange-100 text-orange-900 rounded-md font-semibold text-xs hover:bg-orange-200 transition-colors"
+                          >
+                            📜 Ficha Normativa / B.O. ↗
+                          </a>
+                        )}
+                        {item.rawId && (item.modificaCount > 0 || item.modificadaPorCount > 0) && (
+                          <button
+                            type="button"
+                            onClick={() => toggleNormRelations(item.rawId)}
+                            className="px-2.5 py-1.5 bg-orange-50 border border-orange-200 text-orange-800 rounded-md font-bold text-[11px] hover:bg-orange-100"
+                          >
+                            {isExpanded ? '▲ Ocultar vínculos' : `🔗 Vínculos (${item.modificaCount}/${item.modificadaPorCount})`}
+                          </button>
+                        )}
+                      </div>
+
+                      {isExpanded && (
+                        <div className="mt-3 p-3 bg-orange-50/70 rounded border border-orange-200 text-[11px] text-orange-900">
+                          {loadingRelations ? (
+                            <p>Cargando normas modificadas y modificatorias...</p>
+                          ) : (
+                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                              <div>
+                                <strong>Modifica a ({rel?.modifica_a?.length || 0}):</strong>
+                                <ul className="list-disc list-inside mt-1 space-y-0.5">
+                                  {(rel?.modifica_a || []).map((m, i) => (
+                                    <li key={i}>{m.tipo} {m.numero} ({m.fecha})</li>
+                                  ))}
+                                </ul>
+                              </div>
+                              <div>
+                                <strong>Modificada por ({rel?.modificada_por?.length || 0}):</strong>
+                                <ul className="list-disc list-inside mt-1 space-y-0.5">
+                                  {(rel?.modificada_por || []).map((m, i) => (
+                                    <li key={i}>{m.tipo} {m.numero} ({m.fecha})</li>
+                                  ))}
+                                </ul>
+                              </div>
+                            </div>
+                          )}
+                        </div>
+                      )}
+                    </div>
                   </div>
-                  <div className="flex flex-wrap items-center gap-2 pt-2 border-t border-orange-100">
-                    <a
-                      href={item.url}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="px-3 py-1.5 bg-orange-500 text-white rounded-md font-bold text-xs hover:bg-orange-600 shadow-sm transition-colors"
-                    >
-                      ⚖️ Texto completo en InfoLEG ↗
-                    </a>
-                    {item.boUrl && (
-                      <a
-                        href={item.boUrl}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="px-3 py-1.5 bg-orange-100 text-orange-900 rounded-md font-semibold text-xs hover:bg-orange-200 transition-colors"
-                      >
-                        📜 Ficha Normativa / B.O. ↗
-                      </a>
-                    )}
-                  </div>
-                </div>
-              ))}
+                );
+              })}
             </div>
           </div>
         )}
