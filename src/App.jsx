@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { initializeApp } from 'firebase/app';
 import { getAuth, GoogleAuthProvider, signInWithPopup, signOut, onAuthStateChanged } from 'firebase/auth';
 import { getFirestore, collection, addDoc, query, orderBy, limit, onSnapshot, serverTimestamp, doc, setDoc, deleteDoc, updateDoc, getDocs } from 'firebase/firestore';
@@ -50,6 +50,7 @@ const NEWS_CACHE_TTL_MS = 30 * 60 * 1000;
 const AUTO_ARCHIVE_INTERVAL_MS = 24 * 60 * 60 * 1000;
 const NEWS_STORAGE_KEY = "jifadecs_2027_rss_cache_v3";
 const ARCHIVE_CHECK_STORAGE_KEY = "jifadecs_2027_last_archive_check_v3";
+const INFOLEG_DATASET_URL = 'https://datos.jus.gob.ar/dataset/base-de-datos-legislativos-infoleg';
 
 const ADMIN_EMAILS = [
   'juliangallegos9057@gmail.com',
@@ -692,22 +693,33 @@ const FadecsWorkspace = () => {
   const [expandedNormId, setExpandedNormId] = useState(null);
 
   const chatEndRef = useRef(null);
+  const chatScrollTimerRef = useRef(null);
   const archiveRunningRef = useRef(false);
   const rssFetchingRef = useRef(false);
+  const infolegRequestRef = useRef(null);
+  const infolegRelationsRequestRef = useRef(null);
 
   const userEmailLower = user?.email ? user.email.toLowerCase().trim() : '';
   const isAdmin = ADMIN_EMAILS.includes(userEmailLower);
 
   // Descarga /data/infoleg-busqueda.json SOLO cuando el usuario interactua con el buscador o boton
   const loadInfolegOnDemand = async () => {
-    if (infolegLoaded || loadingInfoleg) return;
+    if (infolegLoaded) return;
+    if (infolegRequestRef.current) return infolegRequestRef.current;
     setLoadingInfoleg(true);
-    try {
-      const res = await fetch('/data/infoleg-busqueda.json');
-      if (res.ok) {
+    const request = (async () => {
+      try {
+        const res = await fetch(`${import.meta.env.BASE_URL}data/infoleg-busqueda.json`);
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
         const data = await res.json();
-        if (Array.isArray(data)) {
-          const mapped = data.map((n) => ({
+        if (!Array.isArray(data)) throw new Error('Formato inesperado de la base InfoLEG');
+        const mapped = data.map((n) => {
+          const secureInfolegUrl = (url) => typeof url === 'string'
+            ? url.replace(/^http:\/\/servicios\.infoleg\.gob\.ar\//i, 'https://servicios.infoleg.gob.ar/')
+            : '';
+          const updatedUrl = secureInfolegUrl(n.texto_actualizado);
+          const originalUrl = secureInfolegUrl(n.texto_original);
+          return {
             id: `infoleg-${n.id_norma}`,
             rawId: String(n.id_norma),
             period: n.period || 'Otros Períodos',
@@ -716,20 +728,23 @@ const FadecsWorkspace = () => {
             date: n.fecha_sancion || 'S/F',
             axis: n.axis || 'Todas',
             summary: n.texto_resumido || n.titulo_sumario || 'Sin resumen disponible.',
-            url: n.texto_actualizado || n.texto_original || 'https://www.argentina.gob.ar/normativa',
-            boUrl: n.texto_original || '',
+            url: updatedUrl || originalUrl || 'https://www.argentina.gob.ar/normativa',
+            boUrl: originalUrl,
             modificaCount: Number(n.modifica_a) || 0,
             modificadaPorCount: Number(n.modificada_por) || 0
-          }));
-          setInfolegExtraNorms(mapped);
-        }
+          };
+        });
+        setInfolegExtraNorms(mapped);
+        setInfolegLoaded(true);
+      } catch (err) {
+        console.error('Error al cargar base InfoLEG bajo demanda:', err);
+      } finally {
+        infolegRequestRef.current = null;
+        setLoadingInfoleg(false);
       }
-      setInfolegLoaded(true);
-    } catch (err) {
-      console.error('Error al cargar base InfoLEG bajo demanda:', err);
-    } finally {
-      setLoadingInfoleg(false);
-    }
+    })();
+    infolegRequestRef.current = request;
+    return request;
   };
 
   // Descarga /data/infoleg-relaciones.json SOLO cuando el usuario pide ver las leyes vinculadas de una norma
@@ -740,21 +755,26 @@ const FadecsWorkspace = () => {
       return;
     }
     setExpandedNormId(rawId);
-    if (!infolegRelations && !loadingRelations) {
+    if (!infolegRelations && !infolegRelationsRequestRef.current) {
       setLoadingRelations(true);
-      try {
-        const res = await fetch('/data/infoleg-relaciones.json');
-        if (res.ok) {
+      const request = (async () => {
+        try {
+          const res = await fetch(`${import.meta.env.BASE_URL}data/infoleg-relaciones.json`);
+          if (!res.ok) throw new Error(`HTTP ${res.status}`);
           const data = await res.json();
           setInfolegRelations(data || {});
-        } else {
+        } catch (err) {
+          console.error('Error al cargar relaciones InfoLEG:', err);
           setInfolegRelations({});
+        } finally {
+          infolegRelationsRequestRef.current = null;
+          setLoadingRelations(false);
         }
-      } catch {
-        setInfolegRelations({});
-      } finally {
-        setLoadingRelations(false);
-      }
+      })();
+      infolegRelationsRequestRef.current = request;
+      await request;
+    } else if (infolegRelationsRequestRef.current) {
+      await infolegRelationsRequestRef.current;
     }
   };
 
@@ -1122,8 +1142,6 @@ const FadecsWorkspace = () => {
         try {
           const apiUrl = `https://api.rss2json.com/v1/api.json?rss_url=${encodeURIComponent(feed.rss)}`;
           const res = await fetch(apiUrl, { signal: controller.signal });
-          clearTimeout(timeoutId);
-
           if (!res.ok) return [];
           const data = await res.json();
           if (!data.items || !Array.isArray(data.items)) return [];
@@ -1167,8 +1185,9 @@ const FadecsWorkspace = () => {
           }
           return parsedArticles;
         } catch {
-          clearTimeout(timeoutId);
           return [];
+        } finally {
+          clearTimeout(timeoutId);
         }
       });
 
@@ -1253,16 +1272,22 @@ const FadecsWorkspace = () => {
 
     const unsubChat = onSnapshot(q, (snapshot) => {
       setMessages(snapshot.docs.map(docSnap => ({ id: docSnap.id, ...docSnap.data() })));
-      setTimeout(() => chatEndRef.current?.scrollIntoView({ behavior: 'smooth' }), 100);
+      clearTimeout(chatScrollTimerRef.current);
+      chatScrollTimerRef.current = setTimeout(() => chatEndRef.current?.scrollIntoView({ behavior: 'smooth' }), 100);
     });
 
-    return () => unsubChat();
+    return () => {
+      unsubChat();
+      clearTimeout(chatScrollTimerRef.current);
+    };
   }, [currentView, user, hasRoomAccess]);
 
   useEffect(() => {
+    let scrollTimer;
     if (roomTab === 'chat') {
-      setTimeout(() => chatEndRef.current?.scrollIntoView({ behavior: 'smooth' }), 100);
+      scrollTimer = setTimeout(() => chatEndRef.current?.scrollIntoView({ behavior: 'smooth' }), 100);
     }
+    return () => clearTimeout(scrollTimer);
   }, [roomTab]);
 
   // 8. Enviar, Editar y Borrar Mensajes
@@ -1357,7 +1382,10 @@ const FadecsWorkspace = () => {
     'Perspectiva de Género',
     'UNCo (Fiske Menuco / Neuquén)'
   ];
-  const filteredNews = selectedCategory === 'Todas' ? newsList : newsList.filter(n => n.tag === selectedCategory);
+  const filteredNews = useMemo(
+    () => selectedCategory === 'Todas' ? newsList : newsList.filter(n => n.tag === selectedCategory),
+    [newsList, selectedCategory]
+  );
 
   const periods = [
     'Todos',
@@ -1367,19 +1395,20 @@ const FadecsWorkspace = () => {
     'Javier Milei (2023-Presente)'
   ];
 
-  const combinedGazetteNorms = infolegLoaded
-    ? [...officialGazetteNorms, ...infolegExtraNorms]
-    : officialGazetteNorms;
-
-  const filteredNorms = combinedGazetteNorms.filter((item) => {
-    const matchPeriod = selectedPeriod === 'Todos' || item.period === selectedPeriod;
-    const matchAxis = selectedGazetteAxis === 'Todas' || item.axis === selectedGazetteAxis;
+  const filteredNorms = useMemo(() => {
+    const combinedGazetteNorms = infolegLoaded
+      ? [...officialGazetteNorms, ...infolegExtraNorms]
+      : officialGazetteNorms;
     const q = normalizeText(gazetteSearch.trim());
-    const matchSearch =
-      !q ||
-      normalizeText(`${item.normType} ${item.title} ${item.summary} ${item.axis}`).includes(q);
-    return matchPeriod && matchAxis && matchSearch;
-  }).slice(0, 40);
+    return combinedGazetteNorms.filter((item) => {
+      const matchPeriod = selectedPeriod === 'Todos' || item.period === selectedPeriod;
+      const matchAxis = selectedGazetteAxis === 'Todas' || item.axis === selectedGazetteAxis;
+      const matchSearch = !q || normalizeText(
+        `${item.normType} ${item.title} ${item.summary} ${item.axis}`
+      ).includes(q);
+      return matchPeriod && matchAxis && matchSearch;
+    }).slice(0, 40);
+  }, [infolegLoaded, infolegExtraNorms, selectedPeriod, selectedGazetteAxis, gazetteSearch]);
 
   // PANTALLA DE LOGIN
   if (!user) {
@@ -1583,6 +1612,14 @@ const FadecsWorkspace = () => {
                 </p>
               </div>
               <div className="flex flex-wrap gap-2">
+                <a
+                  href={INFOLEG_DATASET_URL}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="px-3 py-2 bg-white border border-orange-300 text-orange-900 rounded-lg font-bold text-xs md:text-sm hover:bg-orange-100 shadow-sm"
+                >
+                  📥 CSV y bases oficiales actualizadas ↗
+                </a>
                 {!infolegLoaded && (
                   <button
                     onClick={loadInfolegOnDemand}
