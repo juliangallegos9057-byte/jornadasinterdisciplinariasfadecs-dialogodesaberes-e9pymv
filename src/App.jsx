@@ -19,7 +19,7 @@ const auth = getAuth(app);
 const db = getFirestore(app);
 const provider = new GoogleAuthProvider();
 
-// Enlaces de Google Drive y Google Docs (fragmentados para seguridad de sintaxis)
+// Enlaces de Google Drive y Google Docs
 const DRIVE_REPO_URL = [
   'https://drive.google.com/drive/folders/',
   '1E-9JMFs1ot4Y1Omp_OJSbcl3Ilu',
@@ -46,8 +46,8 @@ const DEFAULT_SALAS_CHAT_DOC_URL = [
 
 const MAX_MSG_LENGTH = 1000;
 const LIVE_CHAT_LIMIT = 150;
-const NEWS_CACHE_TTL_MS = 30 * 60 * 1000; // 30 minutos de cache persistente
-const AUTO_ARCHIVE_INTERVAL_MS = 24 * 60 * 60 * 1000; // 24 horas
+const NEWS_CACHE_TTL_MS = 30 * 60 * 1000;
+const AUTO_ARCHIVE_INTERVAL_MS = 24 * 60 * 60 * 1000;
 const NEWS_STORAGE_KEY = "jifadecs_2027_rss_cache_v3";
 const ARCHIVE_CHECK_STORAGE_KEY = "jifadecs_2027_last_archive_check_v3";
 
@@ -348,7 +348,7 @@ const matchesCategoryStrictly = (realTitle, realDesc, sourceName, category) => {
   return false;
 };
 
-// Repertorio Historico de Boletin Oficial e InfoLEG
+// Repertorio Historico de Boletin Oficial e InfoLEG con URLs modernas de argentina.gob.ar/normativa (carga instantanea sin bloqueos)
 const officialGazetteNorms = [
   {
     id: 'bo-nk-1',
@@ -358,7 +358,8 @@ const officialGazetteNorms = [
     date: '19 Mar 2004',
     axis: 'Configuraciones y Reformas Laborales',
     summary: 'Deroga la Ley 25.250 de flexibilización laboral, restablece la ultraactividad de los convenios colectivos y fortalece el poder de negociación paritaria de los trabajadores.',
-    url: 'https://servicios.infoleg.gob.ar/infolegInternet/verNorma.do?id=93595'
+    url: 'https://www.argentina.gob.ar/normativa/nacional/ley-25877-93595/texto',
+    boUrl: 'https://www.argentina.gob.ar/normativa/nacional/ley-25877-93595'
   },
   {
     id: 'bo-nk-2',
@@ -368,7 +369,8 @@ const officialGazetteNorms = [
     date: '23 Nov 2006',
     axis: 'Desigualdades Socio-Territoriales',
     summary: 'Suspende la ejecución de sentencias de desalojo y ordena el relevamiento técnico-jurídico-catastral de las tierras ocupadas tradicionalmente por comunidades indígenas.',
-    url: 'https://servicios.infoleg.gob.ar/infolegInternet/verNorma.do?id=122499'
+    url: 'https://www.argentina.gob.ar/normativa/nacional/ley-26160-122499/texto',
+    boUrl: 'https://www.argentina.gob.ar/normativa/nacional/ley-26160-122499'
   },
   {
     id: 'bo-cfk-1',
@@ -378,7 +380,8 @@ const officialGazetteNorms = [
     date: '01 Abr 2009',
     axis: 'Perspectiva de Género',
     summary: 'Tipifica las violencias física, psicológica, sexual, económica, patrimonial y simbólica, transformando el marco jurídico de protección de derechos y relaciones de género.',
-    url: 'https://servicios.infoleg.gob.ar/infolegInternet/verNorma.do?id=152155'
+    url: 'https://www.argentina.gob.ar/normativa/nacional/ley-26485-152155/texto',
+    boUrl: 'https://www.argentina.gob.ar/normativa/nacional/ley-26485-152155'
   },
   {
     id: 'bo-cfk-2',
@@ -388,7 +391,8 @@ const officialGazetteNorms = [
     date: '29 Oct 2009',
     axis: 'Desigualdades Socio-Territoriales',
     summary: 'Extiende las asignaciones familiares a trabajadores no registrados y desocupados, reconfigurando la política social y el piso de ingresos de la niñez.',
-    url: 'https://servicios.infoleg.gob.ar/infolegInternet/verNorma.do?id=159466'
+    url: 'https://www.argentina.gob.ar/normativa/nacional/decreto-1602-2009-159466/texto',
+    boUrl: 'https://www.argentina.gob.ar/normativa/nacional/decreto-1602-2009-159466'
   },
   {
     id: 'bo-cfk-3',
@@ -398,7 +402,8 @@ const officialGazetteNorms = [
     date: '04 May 2012',
     axis: 'Extractivismo y Minería',
     summary: 'Declara de interés público nacional el autoabastecimiento de hidrocarburos y recupera el control estatal de YPF, impulsando el desarrollo a gran escala de Vaca Muerta en Neuquén y Río Negro.',
-    url: 'https://servicios.infoleg.gob.ar/infolegInternet/verNorma.do?id=196894'
+    url: 'https://www.argentina.gob.ar/normativa/nacional/ley-26741-196894/texto',
+    boUrl: 'https://www.argentina.gob.ar/normativa/nacional/ley-26741-196894'
   },
   {
     id: 'bo-cfk-4',
@@ -408,7 +413,8 @@ const officialGazetteNorms = [
     date: '23 May 2012',
     axis: 'Perspectiva de Género',
     summary: 'Reconoce el derecho a la identidad de género autopercibida sin requisitos patologizantes ni judiciales y garantiza el acceso integral a la salud.',
-    url: 'https://servicios.infoleg.gob.ar/infolegInternet/verNorma.do?id=197860'
+    url: 'https://www.argentina.gob.ar/normativa/nacional/ley-26743-197860/texto',
+    boUrl: 'https://www.argentina.gob.ar/normativa/nacional/ley-26743-197860'
   },
   {
     id: 'bo-mm-1',
@@ -418,7 +424,8 @@ const officialGazetteNorms = [
     date: '29 Dic 2015',
     axis: 'Desigualdades Socio-Territoriales',
     summary: 'Modifica por Decreto de Necesidad y Urgencia los límites a la concentración de licencias de medios y altera la estructura regulatoria de la Ley 26.522.',
-    url: 'https://servicios.infoleg.gob.ar/infolegInternet/verNorma.do?id=257461'
+    url: 'https://www.argentina.gob.ar/normativa/nacional/decreto-267-2015-257461/texto',
+    boUrl: 'https://www.argentina.gob.ar/normativa/nacional/decreto-267-2015-257461'
   },
   {
     id: 'bo-mm-2',
@@ -428,7 +435,8 @@ const officialGazetteNorms = [
     date: '27 Ene 2017',
     axis: 'Desigualdades Socio-Territoriales',
     summary: 'Endurece los controles migratorios y crea un procedimiento sumarísimo de expulsión, restringiendo garantías de defensa (posteriormente derogado en 2021).',
-    url: 'https://servicios.infoleg.gob.ar/infolegInternet/verNorma.do?id=271245'
+    url: 'https://www.argentina.gob.ar/normativa/nacional/decreto-70-2017-271245/texto',
+    boUrl: 'https://www.argentina.gob.ar/normativa/nacional/decreto-70-2017-271245'
   },
   {
     id: 'bo-mm-3',
@@ -438,7 +446,8 @@ const officialGazetteNorms = [
     date: '28 Dic 2017',
     axis: 'Configuraciones y Reformas Laborales',
     summary: 'Cambia el cálculo de actualización de haberes jubilatorios y asignaciones sociales, además de elevar la opción de edad jubilatoria a los 70 años.',
-    url: 'https://servicios.infoleg.gob.ar/infolegInternet/verNorma.do?id=305262'
+    url: 'https://www.argentina.gob.ar/normativa/nacional/ley-27426-305262/texto',
+    boUrl: 'https://www.argentina.gob.ar/normativa/nacional/ley-27426-305262'
   },
   {
     id: 'bo-mm-4',
@@ -448,7 +457,8 @@ const officialGazetteNorms = [
     date: '25 Oct 2018',
     axis: 'Desigualdades Socio-Territoriales',
     summary: 'Declara de utilidad pública y sujetos a expropiación los terrenos de barrios populares relevados en el RENABAP y suspende desalojos.',
-    url: 'https://servicios.infoleg.gob.ar/infolegInternet/verNorma.do?id=315739'
+    url: 'https://www.argentina.gob.ar/normativa/nacional/ley-27453-315739/texto',
+    boUrl: 'https://www.argentina.gob.ar/normativa/nacional/ley-27453-315739'
   },
   {
     id: 'bo-af-1',
@@ -458,7 +468,8 @@ const officialGazetteNorms = [
     date: '13 Dic 2019',
     axis: 'Configuraciones y Reformas Laborales',
     summary: 'Declara la emergencia ocupacional y establece el derecho a percibir el doble de la indemnización legal en casos de despido sin justa causa.',
-    url: 'https://servicios.infoleg.gob.ar/infolegInternet/verNorma.do?id=333297'
+    url: 'https://www.argentina.gob.ar/normativa/nacional/decreto-34-2019-333297/texto',
+    boUrl: 'https://www.argentina.gob.ar/normativa/nacional/decreto-34-2019-333297'
   },
   {
     id: 'bo-af-2',
@@ -468,7 +479,8 @@ const officialGazetteNorms = [
     date: '11 Jun 2020',
     axis: 'Desigualdades Socio-Territoriales',
     summary: 'Establece un plazo mínimo legal de 3 años para alquileres habitacionales y actualización anual mediante índice mixto entre inflación (IPC) y salarios (RIPTE).',
-    url: 'https://servicios.infoleg.gob.ar/infolegInternet/verNorma.do?id=339378'
+    url: 'https://www.argentina.gob.ar/normativa/nacional/ley-27551-339378/texto',
+    boUrl: 'https://www.argentina.gob.ar/normativa/nacional/ley-27551-339378'
   },
   {
     id: 'bo-af-3',
@@ -478,7 +490,8 @@ const officialGazetteNorms = [
     date: '30 Dic 2020',
     axis: 'Perspectiva de Género',
     summary: 'Consagra el derecho a decidir la interrupción del embarazo hasta la semana 14 inclusive y regula su cobertura gratuita en todo el sistema de salud.',
-    url: 'https://servicios.infoleg.gob.ar/infolegInternet/verNorma.do?id=346231'
+    url: 'https://www.argentina.gob.ar/normativa/nacional/ley-27610-346231/texto',
+    boUrl: 'https://www.argentina.gob.ar/normativa/nacional/ley-27610-346231'
   },
   {
     id: 'bo-af-4',
@@ -488,7 +501,8 @@ const officialGazetteNorms = [
     date: '24 Jun 2021',
     axis: 'Perspectiva de Género',
     summary: 'Ley Diana Sacayán - Lohana Berkins: establece un cupo mínimo del 1% de los cargos del sector público nacional e incentivos para la contratación registrada.',
-    url: 'https://servicios.infoleg.gob.ar/infolegInternet/verNorma.do?id=351815'
+    url: 'https://www.argentina.gob.ar/normativa/nacional/ley-27636-351815/texto',
+    boUrl: 'https://www.argentina.gob.ar/normativa/nacional/ley-27636-351815'
   },
   {
     id: 'bo-jm-1',
@@ -498,7 +512,8 @@ const officialGazetteNorms = [
     date: '20 Dic 2023',
     axis: 'Configuraciones y Reformas Laborales',
     summary: 'Deroga la Ley de Alquileres, la Ley de Abastecimiento y la Ley de Tierras, impulsa privatizaciones de empresas públicas y reforma el régimen laboral.',
-    url: 'https://servicios.infoleg.gob.ar/infolegInternet/verNorma.do?id=395521'
+    url: 'https://www.argentina.gob.ar/normativa/nacional/decreto-70-2023-395521/texto',
+    boUrl: 'https://www.boletinoficial.gob.ar/detalleAviso/primera/301122/20231221'
   },
   {
     id: 'bo-jm-2',
@@ -508,7 +523,8 @@ const officialGazetteNorms = [
     date: '27 Jun 2024',
     axis: 'Políticas de Inversión (RIGI / Súper RIGI)',
     summary: 'Crea el Régimen de Incentivo para Grandes Inversiones (RIGI) con beneficios fiscales, aduaneros y cambiarios por 30 años, y elimina multas por trabajo no registrado.',
-    url: 'https://servicios.infoleg.gob.ar/infolegInternet/verNorma.do?id=401266'
+    url: 'https://www.argentina.gob.ar/normativa/nacional/ley-27742-401266/texto',
+    boUrl: 'https://www.boletinoficial.gob.ar/detalleAviso/primera/310188/20240708'
   },
   {
     id: 'bo-jm-3',
@@ -518,7 +534,8 @@ const officialGazetteNorms = [
     date: '09 Dic 2024',
     axis: 'Extractivismo y Minería',
     summary: 'Da por finalizada la emergencia en materia de posesión y propiedad de tierras indígenas, habilitando nuevamente procesos de desalojo en territorios comunitarios.',
-    url: 'https://www.boletinoficial.gob.ar/detalleAviso/primera/317965/20241210'
+    url: 'https://www.boletinoficial.gob.ar/detalleAviso/primera/317965/20241210',
+    boUrl: 'https://www.argentina.gob.ar/normativa/nacional'
   }
 ];
 
@@ -804,7 +821,7 @@ const FadecsWorkspace = () => {
     }
   };
 
-  // Agregar correo autorizado a una sala de monografia (actualiza tambien el listado de visibilidad del menu)
+  // Agregar correo autorizado a una sala de monografia
   const handleAddAllowedEmail = async (e) => {
     e.preventDefault();
     if (!isAdmin || !isCurrentRoomView) return;
@@ -831,7 +848,7 @@ const FadecsWorkspace = () => {
     }
   };
 
-  // Quitar correo autorizado de una sala (oculta inmediatamente la sala del menu de ese usuario)
+  // Quitar correo autorizado de una sala
   const handleRemoveAllowedEmail = async (emailToRemove) => {
     if (!isAdmin || !isCurrentRoomView) return;
     const updatedEmails = effectiveAllowedEmails.filter(em => em !== emailToRemove);
@@ -1474,7 +1491,7 @@ const FadecsWorkspace = () => {
           </div>
         )}
 
-        {/* VISTA 2: BOLETIN OFICIAL Y LEGISLACION HISTORICA (INFOLEG) */}
+        {/* VISTA 2: BOLETIN OFICIAL Y LEGISLACION HISTORICA (INFOLEG MODERNO) */}
         {currentView === 'boletin-oficial' && (
           <div className="flex-1 overflow-y-auto p-4 md:p-8 bg-orange-50/50">
             <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-4">
@@ -1526,18 +1543,30 @@ const FadecsWorkspace = () => {
                     </div>
                     <h3 className="text-base md:text-lg font-bold text-orange-900 mb-2 leading-snug">{item.title}</h3>
                     <p className="text-orange-700 text-xs md:text-sm mb-3">{item.summary}</p>
-                    <span className="inline-block px-2 py-0.5 bg-orange-100 text-orange-800 text-[10px] font-bold rounded mb-3">
+                    <span className="inline-block px-2 py-0.5 bg-orange-100 text-orange-800 text-[10px] font-bold rounded mb-4">
                       Eje vinculado: {item.axis} • Promulgación/Publicación: {item.date}
                     </span>
                   </div>
-                  <a
-                    href={item.url}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="text-orange-600 font-bold text-xs md:text-sm hover:text-orange-800 self-start"
-                  >
-                    Ver texto oficial completo en InfoLEG / Boletín Oficial →
-                  </a>
+                  <div className="flex flex-wrap items-center gap-2 pt-2 border-t border-orange-100">
+                    <a
+                      href={item.url}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="px-3 py-1.5 bg-orange-500 text-white rounded-md font-bold text-xs hover:bg-orange-600 shadow-sm transition-colors"
+                    >
+                      ⚖️ Texto completo en InfoLEG ↗
+                    </a>
+                    {item.boUrl && (
+                      <a
+                        href={item.boUrl}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="px-3 py-1.5 bg-orange-100 text-orange-900 rounded-md font-semibold text-xs hover:bg-orange-200 transition-colors"
+                      >
+                        📜 Ficha Normativa / B.O. ↗
+                      </a>
+                    )}
+                  </div>
                 </div>
               ))}
             </div>
