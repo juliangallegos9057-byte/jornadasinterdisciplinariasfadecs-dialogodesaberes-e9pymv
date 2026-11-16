@@ -50,7 +50,6 @@ const NEWS_CACHE_TTL_MS = 30 * 60 * 1000;
 const AUTO_ARCHIVE_INTERVAL_MS = 24 * 60 * 60 * 1000;
 const NEWS_STORAGE_KEY = "jifadecs_2027_rss_cache_v3";
 const ARCHIVE_CHECK_STORAGE_KEY = "jifadecs_2027_last_archive_check_v3";
-const OFFLINE_NORMS_STORAGE_KEY = "jifadecs_2027_offline_norms_backup_v1";
 
 const INFOLEG_DATASET_URL = 'https://datos.jus.gob.ar/dataset/base-de-datos-legislativos-infoleg';
 const SAIJ_DATASET_URL = 'https://datos.jus.gob.ar/dataset/base-saij-de-normativa-provincial';
@@ -178,10 +177,10 @@ const stripHtml = (html) => {
     }
   }
   return text
-    .split('&nbsp;').join(' ')
-    .split('&amp;').join('&')
-    .split('&quot;').join('"')
-    .split('&#39;').join("'")
+    .split(' ').join(' ')
+    .split('&').join('&')
+    .split('"').join('"')
+    .split(''').join("'")
     .split(/\s+/).join(' ')
     .trim();
 };
@@ -726,18 +725,6 @@ const getInitialCachedNews = () => {
   }
 };
 
-// Lectura segura del respaldo offline de normas legislativas en localStorage
-const getInitialOfflineNorms = () => {
-  try {
-    const raw = localStorage.getItem(OFFLINE_NORMS_STORAGE_KEY);
-    if (!raw) return [];
-    const parsed = JSON.parse(raw);
-    return Array.isArray(parsed) ? parsed : [];
-  } catch {
-    return [];
-  }
-};
-
 const FadecsWorkspace = () => {
   const [user, setUser] = useState(null);
   const [currentView, setCurrentView] = useState('chat-general');
@@ -773,18 +760,17 @@ const FadecsWorkspace = () => {
   const [loadingNews, setLoadingNews] = useState(false);
   const [selectedPeriod, setSelectedPeriod] = useState('Todos');
 
-  // Buscador del repertorio historico + bases InfoLEG/SAIJ unificadas + Respaldo Offline
+  // Buscador del repertorio historico + bases InfoLEG unificadas bajo demanda
   const [selectedGazetteAxis, setSelectedGazetteAxis] = useState('Todas');
   const [gazetteSearch, setGazetteSearch] = useState('');
   const [appliedGazetteSearch, setAppliedGazetteSearch] = useState('');
-  const [infolegExtraNorms, setInfolegExtraNorms] = useState(getInitialOfflineNorms);
+  const [infolegExtraNorms, setInfolegExtraNorms] = useState([]);
   const [infolegLoaded, setInfolegLoaded] = useState(false);
   const [loadingInfoleg, setLoadingInfoleg] = useState(false);
   const [infolegRelations, setInfolegRelations] = useState(null);
   const [loadingRelations, setLoadingRelations] = useState(false);
   const [expandedNormId, setExpandedNormId] = useState(null);
   const [copiedLinkId, setCopiedLinkId] = useState('');
-  const [offlineStatusMsg, setOfflineStatusMsg] = useState('');
 
   const chatEndRef = useRef(null);
   const chatScrollTimerRef = useRef(null);
@@ -796,7 +782,7 @@ const FadecsWorkspace = () => {
   const userEmailLower = user?.email ? user.email.toLowerCase().trim() : '';
   const isAdmin = ADMIN_EMAILS.includes(userEmailLower);
 
-  // Carga bajo demanda de /data/infoleg-busqueda.json y guardado automatico en cache offline local
+  // Carga bajo demanda de /data/infoleg-busqueda.json (generado por GitHub Action)
   const loadInfolegOnDemand = async () => {
     if (infolegLoaded || loadingInfoleg) return;
     setLoadingInfoleg(true);
@@ -828,11 +814,6 @@ const FadecsWorkspace = () => {
             };
           });
           setInfolegExtraNorms(mapped);
-          try {
-            localStorage.setItem(OFFLINE_NORMS_STORAGE_KEY, JSON.stringify(mapped.slice(0, 400)));
-          } catch {
-            // Si excede la cuota de localStorage, mantiene en memoria RAM
-          }
         }
       }
       setInfolegLoaded(true);
@@ -868,92 +849,6 @@ const FadecsWorkspace = () => {
       setCopiedLinkId(itemId);
       setTimeout(() => setCopiedLinkId(''), 2000);
     }
-  };
-
-  // Descarga individual offline (.txt) de cualquier ley/DNU para guardar en carpeta ante links caidos
-  const handleDownloadSingleNormOffline = (item, relData) => {
-    const modificaList = (relData?.modifica_a || []).map(m => `  - ${m.tipo} ${m.numero} (${m.fecha})`).join('\n') || '  Sin registros cargados';
-    const modificadaPorList = (relData?.modificada_por || []).map(m => `  - ${m.tipo} ${m.numero} (${m.fecha})`).join('\n') || '  Sin registros cargados';
-    const content = [
-      `=== RESPALDO NORMATIVO OFFLINE - JIFADECS 2027 ===`,
-      `Norma: ${item.normType}`,
-      `Título: ${item.title}`,
-      `Período Presidencial: ${item.period}`,
-      `Eje Temático: ${item.axis}`,
-      `Fecha de Promulgación / Publicación: ${item.date}`,
-      `Identificador: ${item.rawId || item.id}`,
-      ``,
-      `--- RESUMEN / SUMARIO NORMATIVO ---`,
-      `${item.summary}`,
-      ``,
-      `--- ENLACES OFICIALES ---`,
-      `Texto Completo InfoLEG: ${sanitizeInfolegLink(item.url, item.normType)}`,
-      `Ficha Normativa / B.O.: ${sanitizeInfolegLink(item.boUrl || item.url, item.normType)}`,
-      ``,
-      `--- VÍNCULOS NORMATIVOS ---`,
-      `Modifica a:\n${modificaList}`,
-      `Modificada por:\n${modificadaPorList}`
-    ].join('\n');
-
-    const blob = new Blob([content], { type: 'text/plain;charset=utf-8' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    const safeName = normalizeText(item.normType || item.id).replace(/[^a-z0-9]+/g, '_');
-    a.download = `Ley_Respaldo_${safeName}.txt`;
-    a.click();
-    URL.revokeObjectURL(url);
-  };
-
-  // Descarga el paquete completo de leyes (.txt y .json) para guardar como respaldo offline en PC/Drive
-  const handleEnableAndDownloadOfflineBackup = async (format = 'txt') => {
-    setOfflineStatusMsg('Preparando respaldo offline completo de leyes, DNU y resoluciones...');
-    if (!infolegLoaded) {
-      await loadInfolegOnDemand();
-    }
-    const seen = new Set();
-    const unified = [];
-    for (const item of [...officialGazetteNorms, ...infolegExtraNorms]) {
-      const key = createDeterministicHash(`${item.normType}-${item.title}`);
-      if (!seen.has(key)) {
-        seen.add(key);
-        unified.push(item);
-      }
-    }
-    try {
-      localStorage.setItem(OFFLINE_NORMS_STORAGE_KEY, JSON.stringify(unified.slice(0, 400)));
-    } catch {
-      // Continuar con la descarga del archivo aunque localStorage este lleno
-    }
-
-    if (format === 'json') {
-      const blob = new Blob([JSON.stringify(unified, null, 2)], { type: 'application/json;charset=utf-8' });
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = `Respaldo_Offline_Leyes_InfoLEG_JIFADECS2027.json`;
-      a.click();
-      URL.revokeObjectURL(url);
-    } else {
-      const blocks = unified.map((it, idx) => [
-        `[${idx + 1}] ${it.normType} | ${it.period}`,
-        `Título: ${it.title}`,
-        `Eje: ${it.axis} | Fecha: ${it.date}`,
-        `Resumen: ${it.summary}`,
-        `Enlace InfoLEG: ${sanitizeInfolegLink(it.url, it.normType)}`,
-        `Enlace B.O.: ${sanitizeInfolegLink(it.boUrl || it.url, it.normType)}`,
-        `------------------------------------------------------------`
-      ].join('\n'));
-      const header = `=== RESPALDO OFFLINE UNIFICADO DE LEGISLACION E INFOLEG (JIFADECS 2027) ===\nTotal de normas respaldadas: ${unified.length}\nGenerado: ${new Date().toLocaleString('es-AR')}\n\n`;
-      const blob = new Blob([header + blocks.join('\n\n')], { type: 'text/plain;charset=utf-8' });
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = `Respaldo_Offline_Leyes_InfoLEG_JIFADECS2027.txt`;
-      a.click();
-      URL.revokeObjectURL(url);
-    }
-    setOfflineStatusMsg(`✅ Respaldo offline activado en este navegador y archivo descargado (${unified.length} normas). Podés guardarlo en la carpeta de Drive.`);
   };
 
   // Carga bajo demanda de /data/infoleg-relaciones.json
@@ -1292,7 +1187,7 @@ const FadecsWorkspace = () => {
             const dateTxt = m.createdAt?.toDate ? m.createdAt.toDate().toLocaleString('es-AR') : 'Reciente';
             return `[${dateTxt}] ${m.sender} (${m.email}): ${m.text}`;
           });
-          return `============================================================\nSALA: ${rm.name.toUpperCase()}\n============================================================\n` + (rmLines.join('\n') || 'Sin mensajes en esta sala.');
+          return `============================================================\nSALA: ${rm.name.toUpperCase()}\n============================================================\n` + (rmLines.join('\n') || 'Sin intervenciones registradas en esta sala.');
         });
         const roomsBlocks = await Promise.all(roomPromises);
         const content = `=== JIFADECS 2027 - CHAT DE SALAS DE DEBATE (UNIFICADO POR SALA) ===\nFecha de corte: ${nowStr}\n\n` + roomsBlocks.join('\n\n\n');
@@ -1589,7 +1484,6 @@ const FadecsWorkspace = () => {
     setEditingMsgId(null);
     setDocError('');
     setArchiveStatusMsg('');
-    setOfflineStatusMsg('');
   };
 
   const categories = [
@@ -1859,13 +1753,6 @@ const FadecsWorkspace = () => {
               >
                 📁 Abrir carpeta de documentación compartida ↗
               </a>
-              <a
-                href="/data/saij-norpatagonia.json"
-                download="Respaldo_Offline_SAIJ_Norpatagonia.json"
-                className="inline-flex rounded-lg bg-white border border-orange-300 px-4 py-2.5 text-sm font-bold text-orange-900 shadow-sm hover:bg-orange-100"
-              >
-                ⬇️ Descargar Respaldo Offline SAIJ Provincial (.json)
-              </a>
             </div>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               {norpatagoniaPortals.map((portal) => (
@@ -1918,7 +1805,7 @@ const FadecsWorkspace = () => {
           </div>
         )}
 
-        {/* VISTA 2: BOLETIN OFICIAL Y LEGISLACION HISTORICA CON ENLACES A FUENTES EXTERNAS + RESPALDO OFFLINE */}
+        {/* VISTA 2: BOLETIN OFICIAL Y LEGISLACION HISTORICA CON ENLACES A FUENTES EXTERNAS */}
         {currentView === 'boletin-oficial' && (
           <div className="flex-1 overflow-y-auto p-4 md:p-8 bg-orange-50/50">
             <div className="mb-4 rounded-lg border border-amber-300 bg-amber-50 p-3 text-xs md:text-sm leading-relaxed text-amber-950">
@@ -1980,30 +1867,8 @@ const FadecsWorkspace = () => {
                 >
                   ⚖️ Buscador Nacional InfoLEG ↗
                 </a>
-                <button
-                  type="button"
-                  onClick={() => handleEnableAndDownloadOfflineBackup('txt')}
-                  disabled={loadingInfoleg}
-                  className="px-3 py-2 bg-orange-600 text-white rounded-lg font-bold text-xs md:text-sm hover:bg-orange-700 shadow transition-colors disabled:opacity-50"
-                >
-                  {loadingInfoleg ? '🔄 Sincronizando...' : '💾 Descargar Respaldo Offline (.txt)'}
-                </button>
-                <button
-                  type="button"
-                  onClick={() => handleEnableAndDownloadOfflineBackup('json')}
-                  disabled={loadingInfoleg}
-                  className="px-3 py-2 bg-orange-100 border border-orange-300 text-orange-900 rounded-lg font-bold text-xs md:text-sm hover:bg-orange-200 shadow-sm disabled:opacity-50"
-                >
-                  ⬇️ Respaldo Base (.json)
-                </button>
               </div>
             </div>
-
-            {offlineStatusMsg && (
-              <div className="mb-4 p-3 bg-orange-100 border border-orange-300 text-orange-900 text-xs font-semibold rounded-lg">
-                {offlineStatusMsg}
-              </div>
-            )}
 
             <form
               onSubmit={(e) => {
@@ -2034,7 +1899,7 @@ const FadecsWorkspace = () => {
             </form>
 
             <p className="mb-4 text-xs text-orange-700">
-              El repertorio local sirve como apoyo de búsqueda. Las bases oficiales se consultan en sus portales mediante los enlaces superiores; esta página no descarga esos archivos salvo que actives el botón de Respaldo Offline.
+              El repertorio local sirve como apoyo de búsqueda. Las bases oficiales se consultan en sus portales mediante los enlaces superiores y el guardado automático en Google Drive.
             </p>
 
             {/* FILTRO POR TITULOS / EJES METODOLOGICOS DE LAS JORNADAS */}
@@ -2118,13 +1983,6 @@ const FadecsWorkspace = () => {
                           className="px-2.5 py-1.5 bg-orange-50 border border-orange-200 text-orange-800 rounded-md font-semibold text-[11px] hover:bg-orange-100"
                         >
                           {copiedLinkId === item.id ? '✅ Copiado' : '📋 Copiar link'}
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => handleDownloadSingleNormOffline(item, rel)}
-                          className="px-2.5 py-1.5 bg-orange-50 border border-orange-200 text-orange-800 rounded-md font-semibold text-[11px] hover:bg-orange-100"
-                        >
-                          ⬇️ Respaldo (.txt)
                         </button>
                         {item.rawId && (item.modificaCount > 0 || item.modificadaPorCount > 0) && (
                           <button
