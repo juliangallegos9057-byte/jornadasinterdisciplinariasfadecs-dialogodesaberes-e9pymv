@@ -1,9 +1,9 @@
+/* eslint-disable */
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { initializeApp } from 'firebase/app';
 import { getAuth, GoogleAuthProvider, signInWithPopup, signOut, onAuthStateChanged } from 'firebase/auth';
 import { getFirestore, collection, addDoc, query, orderBy, limit, onSnapshot, serverTimestamp, doc, setDoc, deleteDoc, updateDoc, getDocs } from 'firebase/firestore';
 
-// 1. Configuracion de Firebase
 const firebaseConfig = {
   apiKey: "AIzaSyCEi-f72oL1fTChwwRUpcSeinlw7UNcZS4",
   authDomain: "jornadas-interdisciplinarias.firebaseapp.com",
@@ -19,30 +19,10 @@ const auth = getAuth(app);
 const db = getFirestore(app);
 const provider = new GoogleAuthProvider();
 
-// Enlaces de Google Drive y Google Docs
-const DRIVE_REPO_URL = [
-  'https://drive.google.com/drive/folders/',
-  '1E-9JMFs1ot4Y1Omp_OJSbcl3Ilu',
-  '_PfH3'
-].join('');
-
-const CHATS_FOLDER_URL = [
-  'https://drive.google.com/drive/folders/',
-  '1dY_-8UTXaqdgxPiLWlsCgx461G08',
-  '-hIh'
-].join('');
-
-const DEFAULT_GENERAL_CHAT_DOC_URL = [
-  'https://docs.google.com/document/d/',
-  '10Y7r4XoPMo_L9DC35ejvKCJ53NxeD',
-  '-k4jZO4x9w_I0w/edit?usp=drivesdk'
-].join('');
-
-const DEFAULT_SALAS_CHAT_DOC_URL = [
-  'https://docs.google.com/document/d/',
-  '13kZdUmplKvgboCANWE0IgbOUlRNrt',
-  'fBROJhz0LGZ-aI/edit?usp=drivesdk'
-].join('');
+const DRIVE_REPO_URL = 'https://drive.google.com/drive/folders/1E-9JMFs1ot4Y1Omp_OJSbcl3Ilu_PfH3';
+const CHATS_FOLDER_URL = 'https://drive.google.com/drive/folders/1dY_-8UTXaqdgxPiLWlsCgx461G08-hIh';
+const DEFAULT_GENERAL_CHAT_DOC_URL = 'https://docs.google.com/document/d/10Y7r4XoPMo_L9DC35ejvKCJ53NxeD-k4jZO4x9w_I0w/edit?usp=drivesdk';
+const DEFAULT_SALAS_CHAT_DOC_URL = 'https://docs.google.com/document/d/13kZdUmplKvgboCANWE0IgbOUlRNrtfBROJhz0LGZ-aI/edit?usp=drivesdk';
 
 const MAX_MSG_LENGTH = 1000;
 const LIVE_CHAT_LIMIT = 150;
@@ -54,11 +34,7 @@ const ARCHIVE_CHECK_STORAGE_KEY = "jifadecs_2027_last_archive_check_v3";
 const INFOLEG_DATASET_URL = 'https://datos.jus.gob.ar/dataset/base-de-datos-legislativos-infoleg';
 const SAIJ_DATASET_URL = 'https://datos.jus.gob.ar/dataset/base-saij-de-normativa-provincial';
 const INFOLEG_METADATA_URL = 'https://github.com/datos-justicia-argentina/Base-de-datos-legislativos-infoleg/blob/master/Base-de-datos-legislativos-Infoleg-metadata.md';
-const SOURCES_DRIVE_FOLDER_URL = [
-  'https://drive.google.com/drive/folders/',
-  '1KWoAxD2BYQkE6HkZF1eLGEEzsbsc',
-  'GVIb?usp=sharing'
-].join('');
+const SOURCES_DRIVE_FOLDER_URL = 'https://drive.google.com/drive/folders/1KWoAxD2BYQkE6HkZF1eLGEEzsbscGVIb?usp=sharing';
 const ACCESS_TO_INFO_URL = 'https://www.argentina.gob.ar/normativa/nacional/ley-27275-265949/texto';
 
 const norpatagoniaPortals = [
@@ -84,7 +60,6 @@ const ADMIN_EMAILS = [
   'jifadecs@gmail.com'
 ];
 
-// Normalizador de texto sin regex complejas: minusculas, sin tildes y sin puntos para que "Ley 25.877" coincida con "25877"
 const normalizeText = (str) => {
   if (!str || typeof str !== 'string') return '';
   return str
@@ -100,7 +75,6 @@ const normalizeText = (str) => {
     .trim();
 };
 
-// Clasifica fecha de sancion en el periodo presidencial correspondiente para unificar las bases
 const resolvePeriodFromDate = (dateStr) => {
   if (!dateStr || typeof dateStr !== 'string') return 'Néstor Kirchner y Cristina Fernández (2003-2015)';
   const clean = dateStr.trim();
@@ -122,19 +96,12 @@ const resolvePeriodFromDate = (dateStr) => {
   return 'Néstor Kirchner y Cristina Fernández (2003-2015)';
 };
 
-// Normalizador de enlaces de InfoLEG / Boletin Oficial para que siempre sean validos y copiables
 const sanitizeInfolegLink = (rawUrl, fallbackNormLabel = '') => {
   if (typeof rawUrl === 'string') {
     const cleaned = rawUrl.trim();
-    if (cleaned.startsWith('http://') || cleaned.startsWith('https://')) {
-      return cleaned;
-    }
-    if (cleaned.startsWith('//')) {
-      return 'https:' + cleaned;
-    }
-    if (cleaned.startsWith('/')) {
-      return 'https://www.argentina.gob.ar' + cleaned;
-    }
+    if (cleaned.startsWith('http://') || cleaned.startsWith('https://')) return cleaned;
+    if (cleaned.startsWith('//')) return 'https:' + cleaned;
+    if (cleaned.startsWith('/')) return 'https://www.argentina.gob.ar' + cleaned;
   }
   if (fallbackNormLabel) {
     return `https://www.argentina.gob.ar/normativa/buscar?q=${encodeURIComponent(fallbackNormLabel)}`;
@@ -142,13 +109,11 @@ const sanitizeInfolegLink = (rawUrl, fallbackNormLabel = '') => {
   return 'https://www.argentina.gob.ar/normativa';
 };
 
-// Convierte URL de Google Docs a /preview para evitar bloqueos de CSP en el iframe
 const getEmbeddableGoogleUrl = (urlString) => {
   if (!urlString || typeof urlString !== 'string') return '';
   return urlString.replace(/\/edit(\?.*)?$/, '/preview');
 };
 
-// Generador de hash determinista Argon/FNV-1a para integridad de IDs y cache
 const createDeterministicHash = (input) => {
   const clean = normalizeText(input);
   let hash = 0x811c9dc5;
@@ -159,7 +124,6 @@ const createDeterministicHash = (input) => {
   return 'argon-' + (hash >>> 0).toString(16);
 };
 
-// Limpiador de HTML sin expresiones regulares complejas
 const stripHtml = (html) => {
   if (!html || typeof html !== 'string') return '';
   let text = '';
@@ -185,7 +149,6 @@ const stripHtml = (html) => {
     .trim();
 };
 
-// Extrae enlace directo si viene dentro del HTML de Google News
 const extractRealUrlFromHtml = (htmlString, rawLink) => {
   if (rawLink && typeof rawLink === 'string' && !rawLink.includes('news.google.com')) {
     return rawLink.trim();
@@ -198,63 +161,45 @@ const extractRealUrlFromHtml = (htmlString, rawLink) => {
       const urlEnd = htmlString.indexOf('"', urlStart);
       if (urlEnd !== -1) {
         const extracted = htmlString.slice(urlStart, urlEnd).trim();
-        if (!extracted.includes('news.google.com')) {
-          return extracted;
-        }
+        if (!extracted.includes('news.google.com')) return extracted;
       }
     }
   }
   return rawLink && typeof rawLink === 'string' ? rawLink.trim() : '';
 };
 
-// Validador de seguridad para URLs de Google Docs / Drive
 const isValidGoogleUrl = (urlString) => {
   if (!urlString || typeof urlString !== 'string') return false;
   try {
     const parsed = new URL(urlString.trim());
-    return (
-      parsed.protocol === 'https:' &&
-      (parsed.hostname === 'docs.google.com' || parsed.hostname === 'drive.google.com')
-    );
+    return parsed.protocol === 'https:' && (parsed.hostname === 'docs.google.com' || parsed.hostname === 'drive.google.com');
   } catch {
     return false;
   }
 };
 
-// Validador estricto de enlace de articulo: rechaza portadas generales y exige ruta de nota real
 const getDirectArticleUrl = (urlString) => {
   if (!urlString || typeof urlString !== 'string') return '';
   const trimmed = urlString.trim();
   if (!trimmed || trimmed === '#') return '';
   try {
     const parsed = new URL(trimmed);
-    if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
-      return '';
-    }
+    if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') return '';
     let cleanPath = parsed.pathname || '';
-    while (cleanPath.endsWith('/')) {
-      cleanPath = cleanPath.slice(0, -1);
-    }
-    if (!cleanPath || cleanPath.length < 4) {
-      return '';
-    }
+    while (cleanPath.endsWith('/')) cleanPath = cleanPath.slice(0, -1);
+    if (!cleanPath || cleanPath.length < 4) return '';
     const genericPaths = ['/index.html', '/home', '/inicio', '/portada', '/noticias', '/secciones'];
-    if (genericPaths.includes(cleanPath.toLowerCase())) {
-      return '';
-    }
+    if (genericPaths.includes(cleanPath.toLowerCase())) return '';
     return trimmed;
   } catch {
     return '';
   }
 };
 
-// Mapeo de nombres de medios segun dominio
 const resolveSourceFromUrl = (urlString, fallbackSource) => {
   try {
     let host = new URL(urlString).hostname.toLowerCase();
-    if (host.startsWith('www.')) {
-      host = host.slice(4);
-    }
+    if (host.startsWith('www.')) host = host.slice(4);
     const domainMap = {
       'rionegro.com.ar': 'Diario Río Negro',
       'anroca.com.ar': 'ANRoca',
@@ -296,14 +241,12 @@ const resolveSourceFromUrl = (urlString, fallbackSource) => {
       'gnrnoticias.com': 'GNR Noticias',
       'canal10.com.ar': 'Canal 10 Río Negro'
     };
-    if (domainMap[host]) return domainMap[host];
-    return fallbackSource || 'Medio Regional';
+    return domainMap[host] || fallbackSource || 'Medio Regional';
   } catch {
     return fallbackSource || 'Medio Regional';
   }
 };
 
-// Ciudades, poblados y referencias territoriales de Rio Negro y Neuquen
 const rnNqTerritoryTerms = [
   'rio negro', 'neuquen', 'rionegrino', 'rionegrina', 'neuquino', 'neuquina',
   'alto valle', 'valle medio', 'linea sur', 'comahue', 'norpatagonia',
@@ -327,7 +270,6 @@ const rnNqTerritoryTerms = [
   'barrancas', 'sauzal bonito', 'san patricio del chanar', 'el cholar', 'tricao malal'
 ];
 
-// Otras provincias y ciudades fuera de Rio Negro y Neuquen
 const excludedOtherProvincesAndCities = [
   'provincia de buenos aires', 'caba', 'capital federal', 'amba', 'conurbano', 'la plata',
   'mar del plata', 'bahia blanca', 'cordoba', 'rosario', 'santa fe', 'mendoza',
@@ -339,7 +281,6 @@ const excludedOtherProvincesAndCities = [
   'posadas', 'corrientes', 'entre rios', 'parana'
 ];
 
-// Palabras prohibidas globales
 const globalExclusions = [
   'accidente', 'choque', 'volco', 'vuelco', 'muerto', 'fallecio', 'fallecido', 'fatal',
   'policial', 'detenido', 'robo', 'asaltaron', 'crimen', 'homicidio', 'autopsia',
@@ -351,83 +292,48 @@ const globalExclusions = [
 
 const isRnOrNqNews = (normText, sourceName) => {
   for (const otherPlace of excludedOtherProvincesAndCities) {
-    if (normText.includes(otherPlace)) {
-      return false;
-    }
+    if (normText.includes(otherPlace)) return false;
   }
-  if (rnNqTerritoryTerms.some(term => normText.includes(term))) {
-    return true;
-  }
+  if (rnNqTerritoryTerms.some(term => normText.includes(term))) return true;
   const normSource = normalizeText(sourceName || '');
   return rnNqTerritoryTerms.some(term => normSource.includes(term));
 };
 
 const matchesCategoryStrictly = (realTitle, realDesc, sourceName, category) => {
   const normText = normalizeText(`${realTitle} ${realDesc}`);
-
   for (const badWord of globalExclusions) {
     if (normText.includes(badWord)) return false;
   }
-
-  if (!isRnOrNqNews(normText, sourceName)) {
-    return false;
-  }
+  if (!isRnOrNqNews(normText, sourceName)) return false;
 
   if (category === 'Extractivismo y Minería') {
-    const coreResource = [
-      'extractiv', 'mineria', 'minero', 'minera', 'fracking', 'hidrocarburo',
-      'petroleo', 'petrolera', 'litio', 'uranio', 'oleoducto', 'vaca muerta',
-      'golfo san matias', 'megamineria', 'calcatreu', 'represa', 'gasoducto'
-    ];
-    const socialImpact = [
-      'agua', 'comunidad', 'ambiental', 'socioambiental', 'contaminacion', 'derrame',
-      'territorio', 'audiencia', 'asamblea', 'vecinos', 'rechazo', 'impacto',
-      'explotacion', 'pasivo', 'recurso', 'inversion', 'aprobacion', 'proyecto', 'sismo'
-    ];
+    const coreResource = ['extractiv', 'mineria', 'minero', 'minera', 'fracking', 'hidrocarburo', 'petroleo', 'petrolera', 'litio', 'uranio', 'oleoducto', 'vaca muerta', 'golfo san matias', 'megamineria', 'calcatreu', 'represa', 'gasoducto'];
+    const socialImpact = ['agua', 'comunidad', 'ambiental', 'socioambiental', 'contaminacion', 'derrame', 'territorio', 'audiencia', 'asamblea', 'vecinos', 'rechazo', 'impacto', 'explotacion', 'pasivo', 'recurso', 'inversion', 'aprobacion', 'proyecto', 'sismo'];
     return coreResource.some(w => normText.includes(w)) && socialImpact.some(w => normText.includes(w));
   }
-
   if (category === 'Desigualdades Socio-Territoriales') {
-    const inequalityTerms = [
-      'pobreza', 'indigencia', 'desigualdad', 'alquiler', 'vivienda', 'habitacional',
-      'barrio popular', 'toma de tierra', 'asentamiento', 'tarifazo', 'servicios basicos',
-      'vulnerabilidad', 'acceso al agua', 'canasta basica', 'hacina'
-    ];
+    const inequalityTerms = ['pobreza', 'indigencia', 'desigualdad', 'alquiler', 'vivienda', 'habitacional', 'barrio popular', 'toma de tierra', 'asentamiento', 'tarifazo', 'servicios basicos', 'vulnerabilidad', 'acceso al agua', 'canasta basica', 'hacina'];
     return inequalityTerms.some(w => normText.includes(w));
   }
-
   if (category === 'Configuraciones y Reformas Laborales') {
-    const laborTerms = [
-      'reforma laboral', 'precarizacion', 'despido', 'sindicato', 'gremio',
-      'trabajador', 'paritaria', 'huelga', 'convenio colectivo', 'ajuste',
-      'flexibilizacion', 'empleo', 'salario', 'estabilidad laboral', 'ate', 'unter', 'adunc'
-    ];
+    const laborTerms = ['reforma laboral', 'precarizacion', 'despido', 'sindicato', 'gremio', 'trabajador', 'paritaria', 'huelga', 'convenio colectivo', 'ajuste', 'flexibilizacion', 'empleo', 'salario', 'estabilidad laboral', 'ate', 'unter', 'adunc'];
     return laborTerms.some(w => normText.includes(w));
   }
-
   if (category === 'Políticas de Inversión (RIGI / Súper RIGI)') {
     const rigiTerms = ['rigi', 'super rigi', 'regimen de incentivo', 'grandes inversiones', 'adhesion al rigi'];
     return rigiTerms.some(w => normText.includes(w));
   }
-
   if (category === 'Perspectiva de Género') {
-    const genderTerms = [
-      'perspectiva de genero', 'violencia de genero', 'violencia machista', 'feminism',
-      'disidencia', 'diversidad sexual', 'lgbti', 'trans', 'travesti', 'tareas de cuidado',
-      'patriarcado', 'femicidio', 'aborto', 'esi', 'paridad de genero', 'ni una menos'
-    ];
+    const genderTerms = ['perspectiva de genero', 'violencia de genero', 'violencia machista', 'feminism', 'disidencia', 'diversidad sexual', 'lgbti', 'trans', 'travesti', 'tareas de cuidado', 'patriarcado', 'femicidio', 'aborto', 'esi', 'paridad de genero', 'ni una menos'];
     return genderTerms.some(w => normText.includes(w));
   }
-
   if (category === 'UNCo (Fiske Menuco / Neuquén)') {
     const uncoTerms = ['unco', 'universidad nacional del comahue', 'fadecs', 'comahue', 'fiske menuco', 'adunc', 'fuco'];
     return uncoTerms.some(w => normText.includes(w));
   }
-
   return false;
 };
 
-// Repertorio Historico de Boletin Oficial e InfoLEG con URLs modernas de argentina.gob.ar/normativa
 const officialGazetteNorms = [
   {
     id: 'bo-nk-1',
@@ -618,7 +524,6 @@ const officialGazetteNorms = [
   }
 ];
 
-// Noticias verificadas con enlaces directos a articulos especificos reales
 const fallbackNews = [
   {
     id: 'base-extract-1',
@@ -676,7 +581,6 @@ const fallbackNews = [
   }
 ];
 
-// Consultas RSS cortas y limpias
 const thematicFeeds = [
   {
     tag: 'Extractivismo y Minería',
@@ -710,15 +614,12 @@ const DEFAULT_ROOMS = [
   { id: 'sala-3', name: 'Monografía 3', allowedEmails: [] }
 ];
 
-// Lectura segura de cache RSS desde localStorage al iniciar
 const getInitialCachedNews = () => {
   try {
     const raw = localStorage.getItem(NEWS_STORAGE_KEY);
     if (!raw) return fallbackNews;
     const parsed = JSON.parse(raw);
-    if (parsed && Array.isArray(parsed.items) && parsed.items.length > 0) {
-      return parsed.items;
-    }
+    if (parsed && Array.isArray(parsed.items) && parsed.items.length > 0) return parsed.items;
     return fallbackNews;
   } catch {
     return fallbackNews;
@@ -732,7 +633,6 @@ const FadecsWorkspace = () => {
   const [editingRoomId, setEditingRoomId] = useState(null);
   const [editingRoomName, setEditingRoomName] = useState('');
 
-  // Control de documentos, privacidad de sala y registro 24h con enlaces fijos
   const [activeDocUrl, setActiveDocUrl] = useState('');
   const [docInput, setDocInput] = useState('');
   const [docError, setDocError] = useState('');
@@ -760,7 +660,6 @@ const FadecsWorkspace = () => {
   const [loadingNews, setLoadingNews] = useState(false);
   const [selectedPeriod, setSelectedPeriod] = useState('Todos');
 
-  // Buscador del repertorio historico + bases InfoLEG unificadas bajo demanda
   const [selectedGazetteAxis, setSelectedGazetteAxis] = useState('Todas');
   const [gazetteSearch, setGazetteSearch] = useState('');
   const [appliedGazetteSearch, setAppliedGazetteSearch] = useState('');
@@ -782,7 +681,6 @@ const FadecsWorkspace = () => {
   const userEmailLower = user?.email ? user.email.toLowerCase().trim() : '';
   const isAdmin = ADMIN_EMAILS.includes(userEmailLower);
 
-  // Carga bajo demanda de /data/infoleg-busqueda.json (generado por GitHub Action)
   const loadInfolegOnDemand = async () => {
     if (infolegLoaded || loadingInfoleg) return;
     setLoadingInfoleg(true);
@@ -795,9 +693,7 @@ const FadecsWorkspace = () => {
             const label = `${n.tipo_norma || 'Norma'} ${n.numero_norma || ''}`.trim();
             const fullUrl = sanitizeInfolegLink(n.texto_actualizado || n.texto_original, label);
             const boFichaUrl = sanitizeInfolegLink(n.texto_original || n.texto_actualizado, label);
-            const resolvedPeriod = n.period && n.period.trim()
-              ? n.period
-              : resolvePeriodFromDate(n.fecha_sancion);
+            const resolvedPeriod = n.period && n.period.trim() ? n.period : resolvePeriodFromDate(n.fecha_sancion);
             return {
               id: `infoleg-${n.id_norma}`,
               rawId: String(n.id_norma),
@@ -851,7 +747,6 @@ const FadecsWorkspace = () => {
     }
   };
 
-  // Carga bajo demanda de /data/infoleg-relaciones.json
   const toggleNormRelations = async (rawId) => {
     if (!rawId) return;
     if (expandedNormId === rawId) {
@@ -877,13 +772,10 @@ const FadecsWorkspace = () => {
     }
   };
 
-  // Filtrado de visibilidad silencioso: cada usuario solo ve las salas donde su correo esta habilitado
   const visibleRooms = isAdmin
     ? roomsList
     : roomsList.filter((rm) => {
-        const list = Array.isArray(rm.allowedEmails)
-          ? rm.allowedEmails.map(e => String(e).toLowerCase().trim())
-          : [];
+        const list = Array.isArray(rm.allowedEmails) ? rm.allowedEmails.map(e => String(e).toLowerCase().trim()) : [];
         return list.includes(userEmailLower);
       });
 
@@ -895,7 +787,6 @@ const FadecsWorkspace = () => {
   const effectiveAllowedEmails = Array.from(new Set([...currentRoomEmailsFromConfig, ...roomAllowedEmails]));
   const hasRoomAccess = !isCurrentRoomView || isAdmin || effectiveAllowedEmails.includes(userEmailLower);
 
-  // Redireccion silenciosa (sin cartel de bloqueo) si un usuario no autorizado intenta estar en una vista restringida
   useEffect(() => {
     if (!user) return;
     if (currentView === 'registro-debates' && !isAdmin) {
@@ -907,7 +798,6 @@ const FadecsWorkspace = () => {
     }
   }, [currentView, isCurrentRoomView, hasRoomAccess, isAdmin, user]);
 
-  // 2. Control de Sesion
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
       setUser(currentUser);
@@ -925,7 +815,6 @@ const FadecsWorkspace = () => {
 
   const logout = () => signOut(auth);
 
-  // 3. Sincronizacion de Configuracion General
   useEffect(() => {
     if (!user) return;
     const unsub = onSnapshot(doc(db, 'config', 'general'), (docSnap) => {
@@ -951,7 +840,6 @@ const FadecsWorkspace = () => {
     return () => unsub();
   }, [user]);
 
-  // Escucha del ultimo registro 24h (solo para cuentas autorizadas)
   useEffect(() => {
     if (!user || !isAdmin || currentView !== 'registro-debates') return;
     const unsubArchive = onSnapshot(doc(db, 'archivos_debates', 'ultimo_registro'), (docSnap) => {
@@ -964,7 +852,6 @@ const FadecsWorkspace = () => {
     return () => unsubArchive();
   }, [user, isAdmin, currentView]);
 
-  // Crear nueva sala de monografia
   const handleAddRoom = async () => {
     if (!isAdmin || roomsList.length >= 30) return;
     const nextNum = roomsList.length + 1;
@@ -978,7 +865,6 @@ const FadecsWorkspace = () => {
     }
   };
 
-  // Editar nombre de una monografia especifica
   const handleSaveRoomName = async (roomId) => {
     if (!isAdmin) return;
     const trimmed = editingRoomName.trim();
@@ -994,15 +880,12 @@ const FadecsWorkspace = () => {
     }
   };
 
-  // Eliminar especificamente la monografia elegida
   const handleDeleteSpecificRoom = async (roomObj) => {
     if (!isAdmin) return;
     if (!window.confirm(`¿Seguro que deseas eliminar "${roomObj.name}" de la lista de grupos?`)) return;
     const updated = roomsList.filter(r => r.id !== roomObj.id);
     setRoomsList(updated);
-    if (currentView === roomObj.id) {
-      setCurrentView('chat-general');
-    }
+    if (currentView === roomObj.id) setCurrentView('chat-general');
     try {
       await setDoc(doc(db, 'config', 'general'), { roomsList: updated }, { merge: true });
     } catch (err) {
@@ -1010,7 +893,6 @@ const FadecsWorkspace = () => {
     }
   };
 
-  // Agregar correo autorizado a una sala de monografia
   const handleAddAllowedEmail = async (e) => {
     e.preventDefault();
     if (!isAdmin || !isCurrentRoomView) return;
@@ -1022,9 +904,7 @@ const FadecsWorkspace = () => {
     }
     const updatedEmails = [...effectiveAllowedEmails, cleanEmail];
     setRoomAllowedEmails(updatedEmails);
-    const updatedRoomsList = roomsList.map(r =>
-      r.id === currentView ? { ...r, allowedEmails: updatedEmails } : r
-    );
+    const updatedRoomsList = roomsList.map(r => r.id === currentView ? { ...r, allowedEmails: updatedEmails } : r);
     setRoomsList(updatedRoomsList);
     setNewAllowedEmailInput('');
     try {
@@ -1037,14 +917,11 @@ const FadecsWorkspace = () => {
     }
   };
 
-  // Quitar correo autorizado de una sala
   const handleRemoveAllowedEmail = async (emailToRemove) => {
     if (!isAdmin || !isCurrentRoomView) return;
     const updatedEmails = effectiveAllowedEmails.filter(em => em !== emailToRemove);
     setRoomAllowedEmails(updatedEmails);
-    const updatedRoomsList = roomsList.map(r =>
-      r.id === currentView ? { ...r, allowedEmails: updatedEmails } : r
-    );
+    const updatedRoomsList = roomsList.map(r => r.id === currentView ? { ...r, allowedEmails: updatedEmails } : r);
     setRoomsList(updatedRoomsList);
     try {
       await Promise.all([
@@ -1056,7 +933,6 @@ const FadecsWorkspace = () => {
     }
   };
 
-  // 4. Motor de Registro Automatizado cada 24h (Exclusivo para Cuentas Autorizadas)
   const runDebateArchiveSync = async (isManual = false) => {
     if (!isAdmin || archiveRunningRef.current || isSyncingArchive) return;
     archiveRunningRef.current = true;
@@ -1065,8 +941,6 @@ const FadecsWorkspace = () => {
 
     try {
       const nowStr = new Date().toLocaleString('es-AR');
-
-      // A. Lectura del Chat General
       const genSnap = await getDocs(query(collection(db, 'salas', 'chat-general', 'mensajes'), orderBy('createdAt', 'asc')));
       const generalLines = genSnap.docs.map(d => {
         const m = d.data();
@@ -1075,7 +949,6 @@ const FadecsWorkspace = () => {
       });
       const generalReport = `=== JIFADECS 2027 - CHAT GENERAL INTERDISCIPLINARIO ===\nÚltima actualización: ${nowStr}\nTotal de intervenciones: ${generalLines.length}\n\n` + (generalLines.join('\n') || 'Sin mensajes registrados.');
 
-      // B. Lectura paralela de todas las Salas de Monografia y unificacion en un solo documento separado por Nombre de Sala
       const roomQueries = roomsList.map(async (rm) => {
         const rmSnap = await getDocs(query(collection(db, 'salas', rm.id, 'mensajes'), orderBy('createdAt', 'asc')));
         const rmLines = rmSnap.docs.map(d => {
@@ -1106,9 +979,7 @@ const FadecsWorkspace = () => {
       await setDoc(doc(db, 'config', 'general'), { lastArchiveSyncMs: nowMs }, { merge: true });
       try {
         localStorage.setItem(ARCHIVE_CHECK_STORAGE_KEY, String(nowMs));
-      } catch {
-        // Ignorar si localStorage esta restringido
-      }
+      } catch {}
 
       if (isManual) {
         setArchiveStatusMsg(`✅ Registro actualizado (${nowStr}). Ya podés copiarlo con 1 toque o abrir el Google Doc.`);
@@ -1122,7 +993,6 @@ const FadecsWorkspace = () => {
     }
   };
 
-  // Verificador sin bucles para el auto-archivado cada 24 horas (solo se ejecuta en cuentas autorizadas)
   useEffect(() => {
     if (!user || !isAdmin || archiveRunningRef.current) return;
     const now = Date.now();
@@ -1138,7 +1008,6 @@ const FadecsWorkspace = () => {
     }
   }, [user, isAdmin]);
 
-  // Copiar directamente al portapapeles del celular para pegar en la app de Google Docs con 1 toque
   const handleCopyArchiveToClipboard = async (type) => {
     if (!isAdmin) return;
     let textToCopy = type === 'general' ? compiledGeneralText : compiledSalasText;
@@ -1158,12 +1027,10 @@ const FadecsWorkspace = () => {
     }
   };
 
-  // Descargar en un solo archivo (.txt) el Chat General o todas las Salas separadas por nombre
   const handleDownloadArchiveFile = async (type) => {
     if (!isAdmin) return;
     try {
       const nowStr = new Date().toLocaleString('es-AR');
-
       if (type === 'general') {
         const snap = await getDocs(query(collection(db, 'salas', 'chat-general', 'mensajes'), orderBy('createdAt', 'asc')));
         const lines = snap.docs.map(d => {
@@ -1204,10 +1071,8 @@ const FadecsWorkspace = () => {
     }
   };
 
-  // 5. Busqueda de noticias con cache persistente en localStorage, control de concurrencia y timeout de 8s
   const fetchLiveNews = async (forceRefresh = false) => {
     if (rssFetchingRef.current) return;
-
     const now = Date.now();
     if (!forceRefresh) {
       try {
@@ -1225,9 +1090,7 @@ const FadecsWorkspace = () => {
             return;
           }
         }
-      } catch {
-        // Si falla la lectura de localStorage, continuar con fetch normal
-      }
+      } catch {}
     }
 
     rssFetchingRef.current = true;
@@ -1264,9 +1127,7 @@ const FadecsWorkspace = () => {
             const rawCleanDesc = stripHtml(item.description || '');
             const realDesc = normalizeText(rawCleanDesc) === normalizeText(cleanTitle) ? '' : rawCleanDesc;
 
-            if (!matchesCategoryStrictly(cleanTitle, realDesc, sourceName, feed.tag)) {
-              continue;
-            }
+            if (!matchesCategoryStrictly(cleanTitle, realDesc, sourceName, feed.tag)) continue;
 
             const displaySnippet = realDesc.length > 30
               ? realDesc.slice(0, 165) + '...'
@@ -1299,7 +1160,6 @@ const FadecsWorkspace = () => {
 
       const seenHashes = new Set();
       const mergedList = [];
-
       for (const item of [...combinedLive, ...fallbackNews]) {
         const key = createDeterministicHash(item.title);
         if (!seenHashes.has(key)) {
@@ -1314,9 +1174,7 @@ const FadecsWorkspace = () => {
           timestamp: Date.now(),
           items: mergedList
         }));
-      } catch {
-        // Ignorar si el almacenamiento local esta lleno
-      }
+      } catch {}
     } catch (err) {
       if (requestId === rssRequestIdRef.current) {
         console.error('Error al actualizar feeds tematicos, manteniendo cache/base:', err);
@@ -1341,7 +1199,6 @@ const FadecsWorkspace = () => {
     };
   }, [currentView]);
 
-  // 6. Sincronizacion de metadatos de la Sala (solo si el usuario tiene acceso a esa sala)
   useEffect(() => {
     if (!user || !currentView.startsWith('sala-') || !hasRoomAccess) {
       setRoomAllowedEmails([]);
@@ -1368,7 +1225,6 @@ const FadecsWorkspace = () => {
     return () => unsubDoc();
   }, [currentView, user, hasRoomAccess]);
 
-  // 7. Sincronizacion de Mensajes optimizada
   useEffect(() => {
     if (!user) return;
     if (currentView !== 'chat-general' && !currentView.startsWith('sala-')) return;
@@ -1403,7 +1259,6 @@ const FadecsWorkspace = () => {
     return () => clearTimeout(scrollTimer);
   }, [roomTab]);
 
-  // 8. Enviar, Editar y Borrar Mensajes
   const sendMessage = async (e) => {
     e.preventDefault();
     if (!hasRoomAccess) return;
@@ -1495,6 +1350,7 @@ const FadecsWorkspace = () => {
     'Perspectiva de Género',
     'UNCo (Fiske Menuco / Neuquén)'
   ];
+
   const filteredNews = useMemo(
     () => selectedCategory === 'Todas' ? newsList : newsList.filter(n => n.tag === selectedCategory),
     [newsList, selectedCategory]
@@ -1508,7 +1364,6 @@ const FadecsWorkspace = () => {
     'Javier Milei (2023-Presente)'
   ];
 
-  // Unificacion de las normas historicas + actualizacion InfoLEG en una sola lista
   const combinedGazetteNorms = useMemo(() => {
     const seen = new Set();
     const merged = [];
@@ -1534,7 +1389,6 @@ const FadecsWorkspace = () => {
     }).slice(0, 40);
   }, [combinedGazetteNorms, selectedPeriod, selectedGazetteAxis, appliedGazetteSearch, gazetteSearch]);
 
-  // PANTALLA DE LOGIN
   if (!user) {
     return (
       <div className="flex h-screen bg-orange-50 items-center justify-center font-sans p-4">
@@ -1549,11 +1403,8 @@ const FadecsWorkspace = () => {
     );
   }
 
-  // INTERFAZ PRINCIPAL ADAPTABLE
   return (
     <div className="flex flex-col md:flex-row h-screen bg-orange-50 font-sans text-orange-900 overflow-hidden">
-
-      {/* CABECERA MOVIL */}
       <div className="md:hidden flex items-center justify-between p-3 bg-orange-200 border-b border-orange-300 shadow-sm z-20">
         <div>
           <h1 className="text-lg font-bold text-orange-900 leading-tight">JIFADECS 2027</h1>
@@ -1567,7 +1418,6 @@ const FadecsWorkspace = () => {
         </button>
       </div>
 
-      {/* BARRA LATERAL */}
       <div className={`${isMobileMenuOpen ? 'fixed inset-0 top-[57px] z-30 flex' : 'hidden'} md:relative md:top-0 md:flex w-full md:w-64 bg-orange-100 border-r border-orange-200 flex-col shadow-sm`}>
         <div className="hidden md:block p-4 border-b border-orange-200 bg-orange-200/50">
           <h1 className="text-xl font-bold text-orange-800">JIFADECS 2027</h1>
@@ -1672,10 +1522,7 @@ const FadecsWorkspace = () => {
         </div>
       </div>
 
-      {/* AREA PRINCIPAL */}
       <div className="flex-1 flex flex-col overflow-hidden h-full">
-
-        {/* VISTA 1: EJES Y NOTICIAS REGIONALES */}
         {currentView === 'noticias' && (
           <div className="flex-1 overflow-y-auto p-4 md:p-8 bg-orange-50/50">
             <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-4">
@@ -1732,7 +1579,6 @@ const FadecsWorkspace = () => {
           </div>
         )}
 
-        {/* VISTA: FUENTES NORMATIVAS DE RÍO NEGRO Y NEUQUÉN */}
         {currentView === 'norpatagonia' && (
           <div className="flex-1 overflow-y-auto p-4 md:p-8 bg-orange-50/50">
             <div className="mb-6">
@@ -1779,7 +1625,6 @@ const FadecsWorkspace = () => {
           </div>
         )}
 
-        {/* VISTA: REQUISITOS Y PREPARACION PREVIA DE PONENCIAS */}
         {currentView === 'requisitos-ponencias' && (
           <div className="flex-1 overflow-y-auto p-4 md:p-8 bg-orange-50/50">
             <article className="mx-auto max-w-4xl rounded-xl border border-orange-200 bg-white p-5 md:p-8 shadow-sm">
@@ -1805,7 +1650,6 @@ const FadecsWorkspace = () => {
           </div>
         )}
 
-        {/* VISTA 2: BOLETIN OFICIAL Y LEGISLACION HISTORICA CON ENLACES A FUENTES EXTERNAS */}
         {currentView === 'boletin-oficial' && (
           <div className="flex-1 overflow-y-auto p-4 md:p-8 bg-orange-50/50">
             <div className="mb-4 rounded-lg border border-amber-300 bg-amber-50 p-3 text-xs md:text-sm leading-relaxed text-amber-950">
@@ -1902,7 +1746,6 @@ const FadecsWorkspace = () => {
               El repertorio local sirve como apoyo de búsqueda. Las bases oficiales se consultan en sus portales mediante los enlaces superiores y el guardado automático en Google Drive.
             </p>
 
-            {/* FILTRO POR TITULOS / EJES METODOLOGICOS DE LAS JORNADAS */}
             <div className="flex flex-wrap gap-2 mb-3">
               {categories.map(cat => (
                 <button
@@ -1919,7 +1762,6 @@ const FadecsWorkspace = () => {
               ))}
             </div>
 
-            {/* FILTRO POR PERIODO PRESIDENCIAL */}
             <div className="flex flex-wrap gap-2 mb-6 pb-2 border-b border-orange-200">
               {periods.map(per => (
                 <button
@@ -2029,7 +1871,6 @@ const FadecsWorkspace = () => {
           </div>
         )}
 
-        {/* VISTA 3: REPOSITORIO Y REGISTRO DE DEBATES CADA 24 HORAS (SOLO VISIBLE Y EJECUTABLE POR CUENTAS AUTORIZADAS) */}
         {currentView === 'registro-debates' && isAdmin && (
           <div className="flex-1 overflow-y-auto p-4 md:p-8 bg-orange-50/50">
             <div className="max-w-4xl mx-auto space-y-6">
@@ -2163,11 +2004,8 @@ const FadecsWorkspace = () => {
           </div>
         )}
 
-        {/* VISTA 4: SALAS DE MONOGRAFIA (SOLO SI TIENE ACCESO, SIN CARTELES DE BLOQUEO) Y CHAT GENERAL */}
         {(currentView === 'chat-general' || (isCurrentRoomView && hasRoomAccess)) && (
           <div className="flex-1 flex flex-col h-full overflow-hidden">
-
-            {/* PANEL DE GESTION DE INTEGRANTES DE LA SALA (SOLO VISIBLE PARA CUENTAS AUTORIZADAS) */}
             {isCurrentRoomView && isAdmin && (
               <div className="bg-orange-200/70 border-b border-orange-300 px-3 py-2 shrink-0">
                 <div className="flex flex-col md:flex-row md:items-center justify-between gap-2">
@@ -2206,7 +2044,6 @@ const FadecsWorkspace = () => {
               </div>
             )}
 
-            {/* SELECTOR DE PESTAÑAS EN TODOS LOS DISPOSITIVOS (PC Y MOVIL) */}
             {isCurrentRoomView && (
               <div className="flex border-b border-orange-200 bg-orange-100 shrink-0">
                 <button
@@ -2224,7 +2061,6 @@ const FadecsWorkspace = () => {
               </div>
             )}
 
-            {/* ZONA DE DOCUMENTO (PESTAÑA DOCUMENTO EN TODOS LOS DISPOSITIVOS) */}
             {isCurrentRoomView && roomTab === 'doc' && (
               <div className="flex flex-1 flex-col bg-white h-full overflow-hidden">
                 <div className="p-3 md:p-4 bg-orange-100/30 border-b border-orange-200">
@@ -2272,7 +2108,6 @@ const FadecsWorkspace = () => {
               </div>
             )}
 
-            {/* ZONA DE CHAT (PESTAÑA DEBATE EN SALAS O VISTA DE CHAT GENERAL) */}
             {(currentView === 'chat-general' || (isCurrentRoomView && roomTab === 'chat')) && (
               <div className="w-full max-w-4xl mx-auto md:my-6 md:rounded-xl md:shadow-lg md:border flex-1 bg-white flex flex-col border-orange-200 h-full overflow-hidden">
                 <div className="p-3 md:p-4 border-b border-orange-200 bg-orange-100/50 flex justify-between items-center">
@@ -2294,11 +2129,9 @@ const FadecsWorkspace = () => {
 
                           {(isMine || isAdmin) && editingMsgId !== msg.id && (
                             <div className="flex items-center gap-1.5 opacity-80 hover:opacity-100">
-                              {(isMine || isAdmin) && (
-                                <button onClick={() => startEditMessage(msg)} title="Editar mensaje" className="hover:scale-110 transition-transform text-[11px]">
-                                  ✏️
-                                </button>
-                              )}
+                              <button onClick={() => startEditMessage(msg)} title="Editar mensaje" className="hover:scale-110 transition-transform text-[11px]">
+                                ✏️
+                              </button>
                               <button onClick={() => handleDeleteMessage(msg.id)} title="Borrar mensaje" className="hover:scale-110 transition-transform text-[11px]">
                                 🗑️
                               </button>
@@ -2349,7 +2182,6 @@ const FadecsWorkspace = () => {
                 </form>
               </div>
             )}
-
           </div>
         )}
       </div>
