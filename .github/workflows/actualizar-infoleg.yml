@@ -2,9 +2,8 @@ name: Sincronizar Base InfoLEG
 
 on:
   schedule:
-    # Se ejecuta automáticamente todos los días a las 06:00 AM UTC (03:00 AM Argentina)
     - cron: '0 6 * * *'
-  workflow_dispatch: # Te permite ejecutarlo manualmente desde la pestaña "Actions" en GitHub
+  workflow_dispatch:
 
 permissions:
   contents: write
@@ -23,9 +22,12 @@ jobs:
           python-version: '3.11'
 
       - name: Instalar dependencias necesarias
-        run: pip install pandas requests
+        run: pip install pandas requests google-api-python-client google-auth
 
-      - name: Descargar y filtrar los 3 CSV de InfoLEG
+      - name: Descargar, filtrar CSV y subir respaldo a Google Drive
+        env:
+          GDRIVE_CREDENTIALS: ${{ secrets.GDRIVE_CREDENTIALS }}
+          GDRIVE_FOLDER_URL: ${{ secrets.GDRIVE_FOLDER_URL }}
         run: python scripts/procesar_infoleg.py
 
       - name: Guardar archivos livianos en el repositorio
@@ -33,5 +35,5 @@ jobs:
           git config --local user.email "github-actions[bot]@users.noreply.github.com"
           git config --local user.name "github-actions[bot]"
           git add public/data/
-          git diff --staged --quiet || git commit -m "chore: actualizar base legislativa InfoLEG"
+          git diff --staged --quiet || git commit -m "chore: actualizar base legislativa InfoLEG y respaldo"
           git push
