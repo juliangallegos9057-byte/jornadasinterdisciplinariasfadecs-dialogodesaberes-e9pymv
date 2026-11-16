@@ -177,10 +177,10 @@ const stripHtml = (html) => {
     }
   }
   return text
-    .split(' ').join(' ')
-    .split('&').join('&')
-    .split('"').join('"')
-    .split(''').join("'")
+    .split('&nbsp;').join(' ')
+    .split('&amp;').join('&')
+    .split('&quot;').join('"')
+    .split('&#39;').join("'")
     .split(/\s+/).join(' ')
     .trim();
 };
