@@ -1,5 +1,7 @@
+import base64
 import json
 import os
+import re
 from google.oauth2 import service_account
 from googleapiclient.discovery import build
 from googleapiclient.http import MediaFileUpload
@@ -153,11 +155,57 @@ def limpiar_id(serie):
 
 def extraer_carpeta_drive(url_o_id):
   if not url_o_id:
-    return ""
+    return "1KWoAxD2BYQkE6HkZF1eLGEEzsbscGVIb"
   limpio = url_o_id.strip()
   if "/folders/" in limpio:
     limpio = limpio.split("/folders/")[1].split("?")[0].split("/")[0]
-  return limpio.strip()
+  return limpio.strip() or "1KWoAxD2BYQkE6HkZF1eLGEEzsbscGVIb"
+
+
+def extraer_private_key_sin_json(cred_raw):
+  texto = cred_raw.strip()
+  # Si esta en Base64 (no contiene BEGIN PRIVATE KEY directamente), lo decodificamos ignorando espacios
+  if "BEGIN PRIVATE KEY" not in texto:
+    try:
+      b64_limpio = re.sub(r"[^A-Za-z0-9+/=]", "", texto)
+      # Ajustar padding multiplo de 4
+      resto = len(b64_limpio) % 4
+      if resto:
+        b64_limpio += "=" * (4 - resto)
+      texto = base64.b64decode(b64_limpio).decode("utf-8", errors="ignore")
+    except Exception:
+      pass
+
+  # Extraer directamente el bloque PEM entre -----BEGIN PRIVATE KEY----- y -----END PRIVATE KEY-----
+  match = re.search(
+      r"(-----BEGIN PRIVATE KEY-----.*?-----END PRIVATE KEY-----)",
+      texto,
+      re.DOTALL,
+  )
+  if not match:
+    raise ValueError(
+        "No se encontró '-----BEGIN PRIVATE KEY-----' en el Secret"
+        f" GDRIVE_CREDENTIALS (largo recibido={len(cred_raw)})."
+    )
+
+  pem = match.group(1).replace("\\n", "\n")
+  return {
+      "type": "service_account",
+      "project_id": "jifadecsdialogodesaberes",
+      "private_key_id": "0bde682c24603f7cbb3aa82ac6d7fc3f075753f3",
+      "private_key": pem + "\n",
+      "client_email": (
+          "respaldo-jifadecs@jifadecsdialogodesaberes.iam.gserviceaccount.com"
+      ),
+      "client_id": "112952269602916530212",
+      "auth_uri": "https://accounts.google.com/o/oauth2/auth",
+      "token_uri": "https://oauth2.googleapis.com/token",
+      "auth_provider_x509_cert_url": (
+          "https://www.googleapis.com/oauth2/v1/certs"
+      ),
+      "client_x509_cert_url": "https://www.googleapis.com/robot/v1/metadata/x509/respaldo-jifadecs%40jifadecsdialogodesaberes.iam.gserviceaccount.com",
+      "universe_domain": "googleapis.com",
+  }
 
 
 def subir_archivos_a_drive(rutas_archivos):
@@ -165,21 +213,12 @@ def subir_archivos_a_drive(rutas_archivos):
   folder_raw = os.environ.get("GDRIVE_FOLDER_URL", "").strip()
   target_folder = extraer_carpeta_drive(folder_raw)
 
-  if not cred_raw or not target_folder:
-    print(
-        "Aviso: No se configuraron GDRIVE_CREDENTIALS o GDRIVE_FOLDER_URL. Se"
-        " omite subida a Drive."
-    )
+  if not cred_raw:
+    print("Aviso: El Secret GDRIVE_CREDENTIALS está vacío en GitHub Actions.")
     return
 
   try:
-    # Extrae solo desde la primera '{' hasta la ultima '}' por si quedaron caracteres extra al pegar el Secret
-    inicio = cred_raw.find("{")
-    fin = cred_raw.rfind("}")
-    if inicio != -1 and fin != -1:
-      cred_raw = cred_raw[inicio : fin + 1]
-
-    info_cred = json.loads(cred_raw, strict=False)
+    info_cred = extraer_private_key_sin_json(cred_raw)
     creds = service_account.Credentials.from_service_account_info(
         info_cred, scopes=["https://www.googleapis.com/auth/drive"]
     )
@@ -190,7 +229,7 @@ def subir_archivos_a_drive(rutas_archivos):
         continue
       nombre_archivo = os.path.basename(ruta)
       mime = "application/json" if ruta.endswith(".json") else "text/plain"
-      media = MediaFileUpload(ruta, mimetype=mime, resumable=True)
+      media = MediaFileUpload(ruta, mimetype=mime, resumable=False)
 
       consulta = (
           f"name = '{nombre_archivo}' and '{target_folder}' in parents and"
@@ -198,20 +237,34 @@ def subir_archivos_a_drive(rutas_archivos):
       )
       existentes = (
           service.files()
-          .list(q=consulta, fields="files(id, name)")
+          .list(
+              q=consulta,
+              fields="files(id, name)",
+              supportsAllDrives=True,
+              includeItemsFromAllDrives=True,
+          )
           .execute()
           .get("files", [])
       )
 
       if existentes:
         service.files().update(
-            fileId=existentes[0]["id"], media_body=media
+            fileId=existentes[0]["id"], media_body=media, supportsAllDrives=True
         ).execute()
         print(f"Actualizado en Google Drive: {nombre_archivo}")
       else:
-        meta = {"name": nombre_archivo, "parents": [target_folder]}
-        service.files().create(body=meta, media_body=media).execute()
-        print(f"Creado en Google Drive: {nombre_archivo}")
+        try:
+          meta = {"name": nombre_archivo, "parents": [target_folder]}
+          service.files().create(
+              body=meta, media_body=media, supportsAllDrives=True
+          ).execute()
+          print(f"Creado en Google Drive: {nombre_archivo}")
+        except Exception as create_err:
+          print(
+              f"Aviso al crear {nombre_archivo} (las cuentas de servicio"
+              " gratuitas requieren que el archivo exista previamente en la"
+              f" carpeta para actualizarlo): {create_err}"
+          )
   except Exception as e:
     print("Error subiendo respaldo a Google Drive:", e)
 
@@ -333,27 +386,29 @@ def procesar_todo():
   archivos_generados.append(ruta_busqueda)
   print(f"Guardado {ruta_busqueda} con {len(df_final)} normas clasificadas.")
 
+  # Usamos el mismo nombre que el archivo que ya subiste a tu carpeta de Drive para que el bot lo actualice directo
   ruta_txt_nacional = os.path.join(
-      OUTPUT_DIR, "Respaldo_Leyes_InfoLEG_Nacional.txt"
+      OUTPUT_DIR, "Respaldo_Offline_Leyes_InfoLEG_JIFADECS2027.txt"
   )
   with open(ruta_txt_nacional, "w", encoding="utf-8") as f_txt:
     f_txt.write(
-        "=== RESPALDO AUTOMATICO DE NORMATIVA NACIONAL INFOLEG (JIFADECS"
-        " 2027) ===\n\n"
+        "=== RESPALDO OFFLINE UNIFICADO DE LEGISLACION E INFOLEG (JIFADECS"
+        " 2027) ===\n"
     )
-    for _, r in df_final.iterrows():
+    f_txt.write(f"Total de normas respaldadas: {len(df_final)}\n\n")
+    for idx, (_, r) in enumerate(df_final.iterrows(), start=1):
       f_txt.write(
-          f"[{r.get('tipo_norma', '')} {r.get('numero_norma', '')}] Fecha:"
-          f" {r.get('fecha_sancion', '')} | Eje: {r.get('axis', '')} |"
-          f" Período: {r.get('period', '')}\n"
+          f"[{idx}] {r.get('tipo_norma', '')} {r.get('numero_norma', '')} |"
+          f" {r.get('period', '')}\n"
       )
       f_txt.write(f"Título: {r.get('titulo_resumido', '')}\n")
-      f_txt.write(f"Resumen: {r.get('texto_resumido', '')}\n")
       f_txt.write(
-          f"Texto Actualizado: {r.get('texto_actualizado', '')} | Texto"
-          f" Original: {r.get('texto_original', '')}\n"
+          f"Eje: {r.get('axis', '')} | Fecha: {r.get('fecha_sancion', '')}\n"
       )
-      f_txt.write("-" * 70 + "\n")
+      f_txt.write(f"Resumen: {r.get('texto_resumido', '')}\n")
+      f_txt.write(f"Enlace InfoLEG: {r.get('texto_actualizado', '')}\n")
+      f_txt.write(f"Enlace B.O.: {r.get('texto_original', '')}\n")
+      f_txt.write("-" * 60 + "\n\n")
   archivos_generados.append(ruta_txt_nacional)
 
   print("2. Procesando SAIJ Normativa Provincial (Río Negro y Neuquén)...")
