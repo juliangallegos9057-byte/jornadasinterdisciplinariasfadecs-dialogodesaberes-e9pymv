@@ -161,19 +161,25 @@ def extraer_carpeta_drive(url_o_id):
 
 
 def subir_archivos_a_drive(rutas_archivos):
-  cred_json = os.environ.get("GDRIVE_CREDENTIALS", "").strip()
+  cred_raw = os.environ.get("GDRIVE_CREDENTIALS", "").strip()
   folder_raw = os.environ.get("GDRIVE_FOLDER_URL", "").strip()
   target_folder = extraer_carpeta_drive(folder_raw)
 
-  if not cred_json or not target_folder:
+  if not cred_raw or not target_folder:
     print(
-        "Aviso: No se configuraron los Secrets GDRIVE_CREDENTIALS o"
-        " GDRIVE_FOLDER_URL. Se omite la subida a Drive."
+        "Aviso: No se configuraron GDRIVE_CREDENTIALS o GDRIVE_FOLDER_URL. Se"
+        " omite subida a Drive."
     )
     return
 
   try:
-    info_cred = json.loads(cred_json)
+    # Extrae solo desde la primera '{' hasta la ultima '}' por si quedaron caracteres extra al pegar el Secret
+    inicio = cred_raw.find("{")
+    fin = cred_raw.rfind("}")
+    if inicio != -1 and fin != -1:
+      cred_raw = cred_raw[inicio : fin + 1]
+
+    info_cred = json.loads(cred_raw, strict=False)
     creds = service_account.Credentials.from_service_account_info(
         info_cred, scopes=["https://www.googleapis.com/auth/drive"]
     )
@@ -186,7 +192,10 @@ def subir_archivos_a_drive(rutas_archivos):
       mime = "application/json" if ruta.endswith(".json") else "text/plain"
       media = MediaFileUpload(ruta, mimetype=mime, resumable=True)
 
-      consulta = f"name = '{nombre_archivo}' and '{target_folder}' in parents and trashed = false"
+      consulta = (
+          f"name = '{nombre_archivo}' and '{target_folder}' in parents and"
+          " trashed = false"
+      )
       existentes = (
           service.files()
           .list(q=consulta, fields="files(id, name)")
@@ -195,8 +204,9 @@ def subir_archivos_a_drive(rutas_archivos):
       )
 
       if existentes:
-        item_existente = existentes[0]["id"]
-        service.files().update(fileId=item_existente, media_body=media).execute()
+        service.files().update(
+            fileId=existentes[0]["id"], media_body=media
+        ).execute()
         print(f"Actualizado en Google Drive: {nombre_archivo}")
       else:
         meta = {"name": nombre_archivo, "parents": [target_folder]}
@@ -253,6 +263,7 @@ def procesar_todo():
   if "nacional" in urls:
     for chunk in pd.read_csv(
         urls["nacional"],
+        dtype=str,
         chunksize=40000,
         low_memory=False,
         on_bad_lines="skip",
@@ -322,27 +333,25 @@ def procesar_todo():
   archivos_generados.append(ruta_busqueda)
   print(f"Guardado {ruta_busqueda} con {len(df_final)} normas clasificadas.")
 
-  # Tambien generamos version legible en .txt para consulta directa en la carpeta de Google Drive
   ruta_txt_nacional = os.path.join(
       OUTPUT_DIR, "Respaldo_Leyes_InfoLEG_Nacional.txt"
   )
   with open(ruta_txt_nacional, "w", encoding="utf-8") as f_txt:
     f_txt.write(
-        "=== RESPALDO AUTOMATICO DE NORMATIVA NACIONAL INFOLEG (JIFADECS 2027)"
-        " ===\n\n"
+        "=== RESPALDO AUTOMATICO DE NORMATIVA NACIONAL INFOLEG (JIFADECS"
+        " 2027) ===\n\n"
     )
     for _, r in df_final.iterrows():
       f_txt.write(
           f"[{r.get('tipo_norma', '')} {r.get('numero_norma', '')}] Fecha:"
-          f" {r.get('fecha_sancion', '')} | Eje: {r.get('axis', '')} | Período:"
-          f" {r.get('period', '')}\n"
+          f" {r.get('fecha_sancion', '')} | Eje: {r.get('axis', '')} |"
+          f" Período: {r.get('period', '')}\n"
       )
       f_txt.write(f"Título: {r.get('titulo_resumido', '')}\n")
       f_txt.write(f"Resumen: {r.get('texto_resumido', '')}\n")
       f_txt.write(
-          "Texto Actualizado:"
-          f" {r.get('texto_actualizado', '')} | Texto Original:"
-          f" {r.get('texto_original', '')}\n"
+          f"Texto Actualizado: {r.get('texto_actualizado', '')} | Texto"
+          f" Original: {r.get('texto_original', '')}\n"
       )
       f_txt.write("-" * 70 + "\n")
   archivos_generados.append(ruta_txt_nacional)
@@ -354,6 +363,7 @@ def procesar_todo():
     try:
       for chunk in pd.read_csv(
           u_prov,
+          dtype=str,
           chunksize=30000,
           low_memory=False,
           on_bad_lines="skip",
@@ -389,6 +399,7 @@ def procesar_todo():
       try:
         for chunk in pd.read_csv(
             urls[clave],
+            dtype=str,
             chunksize=50000,
             low_memory=False,
             on_bad_lines="skip",
@@ -407,7 +418,9 @@ def procesar_todo():
             if len(relaciones[id_n][campo_destino]) < 20:
               relaciones[id_n][campo_destino].append({
                   "id": (
-                      str(fila.get(f"id_norma_{prefijo}", "")).replace(".0", "")
+                      str(fila.get(f"id_norma_{prefijo}", "")).replace(
+                          ".0", ""
+                      )
                   ),
                   "tipo": str(fila.get(f"tipo_norma_{prefijo}", "")),
                   "numero": str(fila.get(f"numero_norma_{prefijo}", "")),
@@ -421,8 +434,7 @@ def procesar_todo():
     json.dump(relaciones, f, ensure_ascii=False)
   archivos_generados.append(ruta_relaciones)
   print(
-      f"Guardado {ruta_relaciones} con relaciones para {len(relaciones)}"
-      " normas."
+      f"Guardado {ruta_relaciones} con relaciones para {len(relaciones)} normas."
   )
 
   print(
