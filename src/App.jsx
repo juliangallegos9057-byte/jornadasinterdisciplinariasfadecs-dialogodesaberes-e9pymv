@@ -26,9 +26,9 @@ const DEFAULT_SALAS_CHAT_DOC_URL = 'https://docs.google.com/document/d/13kZdUmpl
 
 const MAX_MSG_LENGTH = 1000;
 const LIVE_CHAT_LIMIT = 150;
-const NEWS_CACHE_TTL_MS = 30 * 60 * 1000;
+const NEWS_CACHE_TTL_MS = 10 * 60 * 1000;
 const AUTO_ARCHIVE_INTERVAL_MS = 24 * 60 * 60 * 1000;
-const NEWS_STORAGE_KEY = "jifadecs_2027_rss_cache_v3";
+const NEWS_STORAGE_KEY = "jifadecs_2027_rss_cache_v6_strict";
 const ARCHIVE_CHECK_STORAGE_KEY = "jifadecs_2027_last_archive_check_v3";
 
 const INFOLEG_DATASET_URL = 'https://datos.jus.gob.ar/dataset/base-de-datos-legislativos-infoleg';
@@ -55,10 +55,7 @@ const norpatagoniaPortals = [
   }
 ];
 
-const ADMIN_EMAILS = [
-  'juliangallegos9057@gmail.com',
-  'jifadecs@gmail.com'
-];
+const ADMIN_EMAILS = ['juliangallegos9057@gmail.com', 'jifadecs@gmail.com'];
 
 const normalizeText = (str) => {
   if (!str || typeof str !== 'string') return '';
@@ -114,8 +111,9 @@ const getEmbeddableGoogleUrl = (urlString) => {
   return urlString.replace(/\/edit(\?.*)?$/, '/preview');
 };
 
+// Motor determinista Argon (FNV-1a 32-bit hex) para sellado de integridad en Firestore y deduplicación
 const createDeterministicHash = (input) => {
-  const clean = normalizeText(input);
+  const clean = normalizeText(String(input || ''));
   let hash = 0x811c9dc5;
   for (let i = 0; i < clean.length; i++) {
     hash ^= clean.charCodeAt(i);
@@ -141,10 +139,10 @@ const stripHtml = (html) => {
     }
   }
   return text
-    .split('&nbsp;').join(' ')
-    .split('&amp;').join('&')
-    .split('&quot;').join('"')
-    .split('&#39;').join("'")
+    .split(' ').join(' ')
+    .split('&').join('&')
+    .split('"').join('"')
+    .split(''').join("'")
     .split(/\s+/).join(' ')
     .trim();
 };
@@ -290,6 +288,7 @@ const globalExclusions = [
   'ahogado', 'desaparecido', 'buscan a', 'ambulancia', 'heridos', 'hospitalizaron'
 ];
 
+// FILTRO REGIONAL Y TEMATICO ESTRICTO: si no coincide exactamente, se descarta y no se muestra
 const isRnOrNqNews = (normText, sourceName) => {
   for (const otherPlace of excludedOtherProvincesAndCities) {
     if (normText.includes(otherPlace)) return false;
@@ -307,16 +306,32 @@ const matchesCategoryStrictly = (realTitle, realDesc, sourceName, category) => {
   if (!isRnOrNqNews(normText, sourceName)) return false;
 
   if (category === 'Extractivismo y Minería') {
-    const coreResource = ['extractiv', 'mineria', 'minero', 'minera', 'fracking', 'hidrocarburo', 'petroleo', 'petrolera', 'litio', 'uranio', 'oleoducto', 'vaca muerta', 'golfo san matias', 'megamineria', 'calcatreu', 'represa', 'gasoducto'];
-    const socialImpact = ['agua', 'comunidad', 'ambiental', 'socioambiental', 'contaminacion', 'derrame', 'territorio', 'audiencia', 'asamblea', 'vecinos', 'rechazo', 'impacto', 'explotacion', 'pasivo', 'recurso', 'inversion', 'aprobacion', 'proyecto', 'sismo'];
+    const coreResource = [
+      'extractiv', 'mineria', 'minero', 'minera', 'fracking', 'hidrocarburo',
+      'petroleo', 'petrolera', 'litio', 'uranio', 'oleoducto', 'vaca muerta',
+      'golfo san matias', 'megamineria', 'calcatreu', 'represa', 'gasoducto'
+    ];
+    const socialImpact = [
+      'agua', 'comunidad', 'ambiental', 'socioambiental', 'contaminacion', 'derrame',
+      'territorio', 'audiencia', 'asamblea', 'vecinos', 'rechazo', 'impacto',
+      'explotacion', 'pasivo', 'recurso', 'inversion', 'aprobacion', 'proyecto', 'sismo'
+    ];
     return coreResource.some(w => normText.includes(w)) && socialImpact.some(w => normText.includes(w));
   }
   if (category === 'Desigualdades Socio-Territoriales') {
-    const inequalityTerms = ['pobreza', 'indigencia', 'desigualdad', 'alquiler', 'vivienda', 'habitacional', 'barrio popular', 'toma de tierra', 'asentamiento', 'tarifazo', 'servicios basicos', 'vulnerabilidad', 'acceso al agua', 'canasta basica', 'hacina'];
+    const inequalityTerms = [
+      'pobreza', 'indigencia', 'desigualdad', 'alquiler', 'vivienda', 'habitacional',
+      'barrio popular', 'toma de tierra', 'asentamiento', 'tarifazo', 'servicios basicos',
+      'vulnerabilidad', 'acceso al agua', 'canasta basica', 'hacina'
+    ];
     return inequalityTerms.some(w => normText.includes(w));
   }
   if (category === 'Configuraciones y Reformas Laborales') {
-    const laborTerms = ['reforma laboral', 'precarizacion', 'despido', 'sindicato', 'gremio', 'trabajador', 'paritaria', 'huelga', 'convenio colectivo', 'ajuste', 'flexibilizacion', 'empleo', 'salario', 'estabilidad laboral', 'ate', 'unter', 'adunc'];
+    const laborTerms = [
+      'reforma laboral', 'precarizacion', 'despido', 'sindicato', 'gremio',
+      'trabajador', 'paritaria', 'huelga', 'convenio colectivo', 'ajuste',
+      'flexibilizacion', 'empleo', 'salario', 'estabilidad laboral', 'ate', 'unter', 'adunc'
+    ];
     return laborTerms.some(w => normText.includes(w));
   }
   if (category === 'Políticas de Inversión (RIGI / Súper RIGI)') {
@@ -324,7 +339,11 @@ const matchesCategoryStrictly = (realTitle, realDesc, sourceName, category) => {
     return rigiTerms.some(w => normText.includes(w));
   }
   if (category === 'Perspectiva de Género') {
-    const genderTerms = ['perspectiva de genero', 'violencia de genero', 'violencia machista', 'feminism', 'disidencia', 'diversidad sexual', 'lgbti', 'trans', 'travesti', 'tareas de cuidado', 'patriarcado', 'femicidio', 'aborto', 'esi', 'paridad de genero', 'ni una menos'];
+    const genderTerms = [
+      'perspectiva de genero', 'violencia de genero', 'violencia machista', 'feminism',
+      'disidencia', 'diversidad sexual', 'lgbti', 'trans', 'travesti', 'tareas de cuidado',
+      'patriarcado', 'femicidio', 'aborto', 'esi', 'paridad de genero', 'ni una menos'
+    ];
     return genderTerms.some(w => normText.includes(w));
   }
   if (category === 'UNCo (Fiske Menuco / Neuquén)') {
@@ -982,7 +1001,7 @@ const FadecsWorkspace = () => {
       } catch {}
 
       if (isManual) {
-        setArchiveStatusMsg(`✅ Registro actualizado (${nowStr}). Ya podés copiarlo con 1 toque o abrir el Google Doc.`);
+        setArchiveStatusMsg(`✅ Registro actualizado con firma ${combinedHash} (${nowStr}).`);
       }
     } catch (err) {
       console.error('Error al sincronizar archivo de debates:', err);
@@ -1071,9 +1090,53 @@ const FadecsWorkspace = () => {
     }
   };
 
+  // Multi-proxy RSS anti-cache para que el boton "Actualizar titulares" consulte XML fresco siempre
+  const fetchRssItems = async (feedUrl, signal) => {
+    const cacheBustUrl = `${feedUrl}&_t=${Date.now()}`;
+    const endpoints = [
+      `https://api.rss2json.com/v1/api.json?rss_url=${encodeURIComponent(cacheBustUrl)}`,
+      `https://api.allorigins.win/raw?url=${encodeURIComponent(cacheBustUrl)}`,
+      `https://corsproxy.io/?${encodeURIComponent(cacheBustUrl)}`
+    ];
+
+    for (const endpoint of endpoints) {
+      try {
+        const res = await fetch(endpoint, { signal, cache: 'no-store' });
+        if (!res.ok) continue;
+
+        if (endpoint.includes('rss2json')) {
+          const data = await res.json();
+          if (data && Array.isArray(data.items) && data.items.length > 0) {
+            return data.items;
+          }
+        } else {
+          const xmlText = await res.text();
+          if (xmlText && xmlText.includes('<item>')) {
+            const parser = new DOMParser();
+            const xmlDoc = parser.parseFromString(xmlText, 'text/xml');
+            const itemNodes = Array.from(xmlDoc.querySelectorAll('item'));
+            if (itemNodes.length > 0) {
+              return itemNodes.map((node) => ({
+                title: node.querySelector('title')?.textContent || '',
+                link: node.querySelector('link')?.textContent || '',
+                description: node.querySelector('description')?.textContent || '',
+                pubDate: node.querySelector('pubDate')?.textContent || '',
+                author: node.querySelector('source')?.textContent || ''
+              }));
+            }
+          }
+        }
+      } catch {
+        // Si un proxy falla o da timeout, continúa con el siguiente
+      }
+    }
+    return [];
+  };
+
   const fetchLiveNews = async (forceRefresh = false) => {
     if (rssFetchingRef.current) return;
     const now = Date.now();
+
     if (!forceRefresh) {
       try {
         const rawCache = localStorage.getItem(NEWS_STORAGE_KEY);
@@ -1101,17 +1164,14 @@ const FadecsWorkspace = () => {
       const promises = thematicFeeds.map(async (feed) => {
         const controller = new AbortController();
         rssControllersRef.current.add(controller);
-        const timeoutId = setTimeout(() => controller.abort(), 8000);
+        const timeoutId = setTimeout(() => controller.abort(), 9000);
 
         try {
-          const apiUrl = `https://api.rss2json.com/v1/api.json?rss_url=${encodeURIComponent(feed.rss)}`;
-          const res = await fetch(apiUrl, { signal: controller.signal });
-          if (!res.ok) return [];
-          const data = await res.json();
-          if (!data.items || !Array.isArray(data.items)) return [];
+          const items = await fetchRssItems(feed.rss, controller.signal);
+          if (!Array.isArray(items) || items.length === 0) return [];
 
           const parsedArticles = [];
-          for (const item of data.items) {
+          for (const item of items) {
             const candidateUrl = extractRealUrlFromHtml(item.description, item.link);
             const directLink = getDirectArticleUrl(candidateUrl);
             if (!directLink) continue;
@@ -1127,6 +1187,7 @@ const FadecsWorkspace = () => {
             const rawCleanDesc = stripHtml(item.description || '');
             const realDesc = normalizeText(rawCleanDesc) === normalizeText(cleanTitle) ? '' : rawCleanDesc;
 
+            // Filtro regional estricto: si no coincide con Río Negro / Neuquén y el eje, NO se muestra
             if (!matchesCategoryStrictly(cleanTitle, realDesc, sourceName, feed.tag)) continue;
 
             const displaySnippet = realDesc.length > 30
@@ -1137,13 +1198,15 @@ const FadecsWorkspace = () => {
               id: createDeterministicHash(`${feed.tag}-${cleanTitle}-${directLink}`),
               tag: feed.tag,
               title: cleanTitle,
-              date: item.pubDate ? new Date(item.pubDate).toLocaleDateString('es-AR', { day: 'numeric', month: 'short', year: 'numeric' }) : 'Actualidad',
+              date: item.pubDate
+                ? new Date(item.pubDate).toLocaleDateString('es-AR', { day: 'numeric', month: 'short', year: 'numeric' })
+                : 'Actualidad',
               source: sourceName,
               url: directLink,
               snippet: displaySnippet
             });
 
-            if (parsedArticles.length >= 3) break;
+            if (parsedArticles.length >= 4) break;
           }
           return parsedArticles;
         } catch {
@@ -1189,7 +1252,7 @@ const FadecsWorkspace = () => {
 
   useEffect(() => {
     if (currentView !== 'noticias') return undefined;
-    fetchLiveNews(false);
+    fetchLiveNews(true);
     return () => {
       rssRequestIdRef.current += 1;
       rssControllersRef.current.forEach((controller) => controller.abort());
@@ -1272,6 +1335,7 @@ const FadecsWorkspace = () => {
         text: trimmed,
         sender: user.displayName || 'Participante',
         email: user.email,
+        contentHash: createDeterministicHash(`${user.email}-${trimmed}`),
         createdAt: serverTimestamp()
       });
     } catch (err) {
@@ -1303,6 +1367,7 @@ const FadecsWorkspace = () => {
     try {
       await updateDoc(doc(db, 'salas', currentView, 'mensajes', msgId), {
         text: trimmed,
+        contentHash: createDeterministicHash(trimmed),
         edited: true
       });
       setEditingMsgId(null);
@@ -1433,7 +1498,7 @@ const FadecsWorkspace = () => {
             <button onClick={() => selectView('noticias')} className={`w-full text-left px-3 py-2.5 rounded-md transition-colors mt-1 text-sm font-medium ${currentView === 'noticias' ? 'bg-orange-500 text-white shadow' : 'hover:bg-orange-200 text-orange-800'}`}>📰 Ejes y Noticias</button>
             <button onClick={() => selectView('boletin-oficial')} className={`w-full text-left px-3 py-2.5 rounded-md transition-colors mt-1 text-sm font-medium ${currentView === 'boletin-oficial' ? 'bg-orange-500 text-white shadow' : 'hover:bg-orange-200 text-orange-800'}`}>📜 Boletín Oficial / DNU</button>
             <p className="mt-1 rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-[11px] leading-snug text-amber-900">
-              <strong>Importante:</strong> Solo descargar base completa de InfoLEG y SAIJ si es necesario; si no, utilizarlas como apoyo de búsqueda.
+              <strong>Importante:</strong> Solo se describen los títulos de las Leyes, DNU y marcos normativos en su contexto histórico-político, utilizar como apoyo para la búsqueda y fundamentación de sus ponencias, gracias.
             </p>
             <button onClick={() => selectView('norpatagonia')} className={`w-full text-left px-3 py-2.5 rounded-md transition-colors mt-2 text-sm font-medium ${currentView === 'norpatagonia' ? 'bg-orange-500 text-white shadow' : 'hover:bg-orange-200 text-orange-800'}`}>🧭 Norpatagonia</button>
             <button onClick={() => selectView('requisitos-ponencias')} className={`w-full text-left px-3 py-2.5 rounded-md transition-colors mt-1 text-sm font-medium ${currentView === 'requisitos-ponencias' ? 'bg-orange-500 text-white shadow' : 'hover:bg-orange-200 text-orange-800'}`}>
@@ -1743,7 +1808,7 @@ const FadecsWorkspace = () => {
             </form>
 
             <p className="mb-4 text-xs text-orange-700">
-              El repertorio local sirve como apoyo de búsqueda. Las bases oficiales se consultan en sus portales mediante los enlaces superiores y el guardado automático en Google Drive.
+              <strong>Importante:</strong> Solo se describen los títulos de las Leyes, DNU y marcos normativos en su contexto histórico-político, utilizar como apoyo para la búsqueda y fundamentación de sus ponencias, gracias.
             </p>
 
             <div className="flex flex-wrap gap-2 mb-3">
